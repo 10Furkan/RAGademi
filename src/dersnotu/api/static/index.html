@@ -19,10 +19,10 @@ main{display:block;padding:32px 0 90px}
       padding:18px 20px 16px;text-decoration:none;color:inherit;
       transition:border-color .15s,transform .15s}
 .card:hover{border-color:var(--ink);transform:translateY(-1px)}
+/* Künye satırı: kod varsa .kod etiketi (app.css), yoksa sade "ders" yazısı. */
 .card .code{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;
-      text-transform:uppercase;color:var(--muted);margin-bottom:9px}
-.card .code b{color:var(--ink);font-weight:400;
-      box-shadow:inset 0 -6px 0 -1px var(--marker)}
+      text-transform:uppercase;color:var(--muted);margin-bottom:10px;
+      min-height:20px}
 .card .nm{font-size:19px;line-height:1.25;font-weight:600;letter-spacing:-.01em;
       margin:0 0 auto;padding-right:22px;word-break:break-word}
 .card .note{font-size:12.5px;color:var(--muted);margin:6px 0 0;
@@ -106,7 +106,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g,
 
 function cardHTML(c){
   const n = c.counts;
-  const kunye = c.code ? `<b>${esc(c.code)}</b>` : "ders";
+  const kunye = c.code ? `<span class="kod">${esc(c.code)}</span>` : "ders";
   // Sıfır sayımı göstermek yeni bir dersi "boş" diye damgalar; onun yerine
   // ne yapılacağını söyle.
   const sayim = (n.lectures + n.books + n.documents) === 0

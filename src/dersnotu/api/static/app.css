@@ -28,7 +28,45 @@ header{padding:56px 0 28px;border-bottom:2px solid var(--ink)}
          text-transform:uppercase;color:var(--muted);margin-bottom:14px}
 h1{font-size:clamp(30px,4.6vw,50px);line-height:1.08;margin:0 0 12px;
    letter-spacing:-.02em;font-weight:600;max-width:19ch}
-h1 .hl{background:linear-gradient(transparent 58%,var(--marker) 58%);padding:0 .06em}
+
+/* Fosforlu kalem metnin ARKASINDA bir bant olarak yalnızca gövde puntosunda
+   çalışıyor — orada gerçekten "işaretlenmiş satır" gibi duruyor. Display
+   puntoda (50px) aynı bant sarı bir levhaya dönüşüyor ve %58'lik kesim
+   harflerin ortasından geçiyor. Kalem burada yanlış alet.
+   Aksan olarak korunuyor: harflerin ALTINDAN geçen kalın bir çizgi.
+
+   `skip-ink:none` + `.22em` ofset ÖLÇÜLDÜ, seçilmedi. Varsayılan
+   `skip-ink:auto` çizgiyi "boş" kelimesindeki ş'nin kuyruğunda kırıyor ve
+   noktanın altında yetim bir parça bırakıyor — kaza gibi duruyor. Ofseti
+   küçültmek (.13/.18) bu kez çizgiyi kuyruğun içinden geçiriyor, büyütmek
+   (.26) kelimelerden koparıyor. .22em kuyruğu temiz geçen ve hâlâ metne
+   bağlı duran tek değer. Punto ile ölçekleniyor, clamp() boyunca oran sabit.
+   Başlık metni değişirse (alt uzantısı olmayan bir kelimeye) yeniden bakılmalı. */
+h1 .hl{
+  text-decoration:underline;
+  text-decoration-color:var(--marker);
+  text-decoration-thickness:.10em;
+  text-underline-offset:.22em;
+  text-decoration-skip-ink:none;
+}
+
+/* Ders kodu bir künye — kütüphane sırt etiketi gibi. Sarı dolgu 11px büyük
+   harfte harf yüksekliğinin tamamını kaplayıp koyu-üstüne-sarı bir kutu
+   oluyordu; çerçeve + renkli sırt hem okunuyor hem etiket gibi duruyor. */
+.kod{
+  display:inline-block;
+  font-family:var(--mono);
+  font-size:10.5px;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--ink);
+  background:var(--surface);
+  border:1px solid var(--rule);
+  border-left:2px solid var(--marker);
+  border-radius:3px;
+  padding:3px 7px 2px 6px;
+  line-height:1.25;
+}
 .lede{color:var(--muted);max-width:56ch;margin:0;font-size:15px}
 a{color:inherit}
 
@@ -99,8 +137,9 @@ button.danger:hover{color:var(--danger);border-color:var(--danger)}
    jest aynı kalıyor, kontrast geri geliyor. Bu kural tanımlardan SONRA
    gelmeli, yoksa eşit özgüllükte kaybeder. */
 @media (prefers-color-scheme:dark){
-  h1 .hl{background:color-mix(in srgb,var(--marker) 26%,transparent);
-         box-shadow:inset 0 -2px 0 var(--marker)}
+  /* h1 .hl'in koyu tema karşılığı YOK ve gerekmiyor: artık dolgu değil çizgi.
+     Bandın altındaki metin koyu temada açık renge dönüp okunmaz oluyordu —
+     çizgi metnin altından geçtiği için o çakışma hiç doğmuyor. */
   .chips input:checked+span{background:color-mix(in srgb,var(--marker) 20%,transparent);
          border-color:var(--marker)}
 }
