@@ -146,6 +146,11 @@ header{padding:34px 0 22px}
           </div>
         </div>
 
+        <!-- Seçeneklerin ne yaptığı. Varsayılan olarak SEÇİLİ olanı anlatır;
+             bir seçeneğin üzerine gelince ona geçer. Dört chip'in altına dört
+             satır yazmak bandı okunmaz ederdi. -->
+        <p class="modehint" id="modehint"></p>
+
         <div class="opts" style="margin-top:18px">
           <label>İlk <input class="num" type="number" name="sections" value="0" min="0" max="40">
                  bölüm (0 = hepsi)</label>
@@ -490,17 +495,64 @@ async function silDokuman(e){
   yukle();
 }
 
+// --- seçenek açıklamaları -------------------------------------------------
+// Metinler sunucudan geliyor (prompts.py / factory.py). Arayüze kopyalansaydı
+// direktif değişip açıklama olduğu yerde kalır ve sessizce yalan söylerdi.
+const YARDIM = { depth: {}, extras: {}, backend: {} };
+
+const yardimMetni = inp => (YARDIM[inp.name] || {})[inp.value] || "";
+
+function yaz(baslik, metin){
+  $("#modehint").innerHTML = metin
+    ? `<b>${esc(baslik)}</b> — ${esc(metin)}`
+    : "";
+}
+
+function varsayilanYardim(){
+  const d = secili("depth");
+  const ekler = $$('input[name="extras"]:checked');
+  if (d) yaz(d.nextElementSibling.textContent, yardimMetni(d));
+  if (ekler.length) {
+    const adlar = ekler.map(i => i.nextElementSibling.textContent).join(", ");
+    $("#modehint").innerHTML +=
+      `<span class="ek">+ ${esc(adlar)} · seçeneğin üzerine gelince ne yaptığını yazar</span>`;
+  }
+}
+
+function yardimBagla(){
+  for (const label of $$(".modes label")) {
+    const inp = label.querySelector("input");
+    const metin = yardimMetni(inp);
+    if (!metin) continue;
+    const baslik = inp.nextElementSibling.textContent;
+    // title: dokunmatikte ve ekran okuyucuda ipucu satırına erişilemiyor.
+    label.title = metin;
+    const goster = () => yaz(baslik, metin);
+    label.addEventListener("mouseenter", goster);
+    inp.addEventListener("focus", goster);
+    label.addEventListener("mouseleave", varsayilanYardim);
+    inp.addEventListener("blur", varsayilanYardim);
+    inp.addEventListener("change", varsayilanYardim);
+  }
+  varsayilanYardim();
+}
+
 // --- kimlik yolları -------------------------------------------------------
 fetch("/api/health").then(r => r.json()).then(h => {
   const b = h.backends || {};
+  Object.assign(YARDIM.depth, h.depth_help || {});
+  Object.assign(YARDIM.extras, h.extra_help || {});
   for (const key of ["api", "cli", "demo"]) {
     const input = document.querySelector(`input[name="backend"][value="${key}"]`);
     const info = b[key] || { available: false };
     input.disabled = !info.available;
+    YARDIM.backend[key] = info.available
+      ? (info.help || info.label)
+      : `${info.help || info.label} — şu an kullanılamıyor.`;
     const label = input.closest("label");
     label.classList.toggle("off", !info.available);
-    label.title = info.available ? info.label : `${info.label} — kullanılamıyor`;
   }
+  yardimBagla();
   const resolved = b.resolved || "demo";
   const pick = document.querySelector(`input[name="backend"][value="${resolved}"]`);
   if (pick && !pick.disabled) pick.checked = true;

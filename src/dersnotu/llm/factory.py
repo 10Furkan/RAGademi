@@ -41,13 +41,29 @@ def backend_status() -> dict[str, Any]:
     cli_ok = ClaudeCodeClient.available()
     return {
         "resolved": resolve_backend("auto"),
-        "api": {"available": api_ok, "label": "API anahtarı"},
+        "api": {
+            "available": api_ok,
+            "label": "API anahtarı",
+            # Açıklamalar bu modülün başındaki tanımların özeti; arayüz
+            # bunları /api/health'ten okuyor, ayrıca yazılı değiller.
+            "help": "ANTHROPIC_API_KEY ile Anthropic API. Token başına ödenir, "
+                    "maliyet öngörülebilir ve hızlıdır (bölüm başına saniyeler).",
+        },
         "cli": {
             "available": cli_ok,
             "label": "Claude Pro / Max aboneliği",
+            "help": "Var olan Claude Pro/Max aboneliğini kullanır; ayrı API "
+                    "anahtarı ve token ücreti yok, 5 saatlik kota harcanır. "
+                    "Belirgin şekilde yavaştır — bölüm başına ~3 dakika.",
             # auth_mode() bir alt süreç başlatıyor; sadece istendiğinde çağrılır.
         },
-        "demo": {"available": True, "label": "Demo (API çağrısı yok)"},
+        "demo": {
+            "available": True,
+            "label": "Demo (API çağrısı yok)",
+            "help": "Hiç model çağrılmaz, ücretsizdir. Çıktı gerçek slayt "
+                    "başlıkları ve gerçek kitap alıntılarından kurulur — "
+                    "boru hattını denemek için, okumak için değil.",
+        },
     }
 
 

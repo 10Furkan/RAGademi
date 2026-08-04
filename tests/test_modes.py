@@ -95,6 +95,38 @@ def test_citation_markers_are_protected_from_translation():
 
 
 # --- Cache bütünlüğü --------------------------------------------------------
+def test_every_option_has_a_user_facing_explanation():
+    """Açıklamalar direktiflerin yanında duruyor ve arayüz onları /api/health'ten
+    okuyor. Yeni bir seçenek eklenip açıklaması unutulursa kullanıcı ne
+    seçtiğini bilmeden seçer."""
+    from dersnotu.llm.prompts import DEPTH_HELP, EXTRA_HELP
+
+    assert set(DEPTH_HELP) == set(DEPTHS)
+    assert set(EXTRA_HELP) == set(EXTRAS)
+    for metin in (*DEPTH_HELP.values(), *EXTRA_HELP.values()):
+        assert len(metin) > 40, "açıklama bir şey anlatacak kadar uzun olmalı"
+
+
+def test_analogy_help_states_the_limit_rule():
+    """Analojinin ayırt edici kuralı 'nerede bozulur'; açıklama bunu atlarsa
+    kullanıcı seçeneği sıradan bir benzetme sanır."""
+    from dersnotu.llm.prompts import EXTRA_HELP
+
+    assert "BOZULDUĞUNU" in EXTRA_HELP["analoji"]
+    assert "bozulur" in EXTRAS["analoji"]  # direktifin kendisi de
+
+
+def test_backend_status_explains_each_option():
+    from dersnotu.llm import backend_status
+
+    b = backend_status()
+    for key in ("api", "cli", "demo"):
+        assert len(b[key]["help"]) > 40
+    # Abonelik yolunun iki gerçeği kullanıcıya söylenmeli: ücretsiz ama yavaş.
+    assert "kota" in b["cli"]["help"]
+    assert "yavaş" in b["cli"]["help"]
+
+
 def test_directives_do_not_touch_the_system_prompt():
     """Sistem promptu cache önekinin ilk baytı — sabit kalmalı."""
     for depth in DEPTHS:

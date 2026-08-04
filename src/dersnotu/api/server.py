@@ -34,7 +34,7 @@ from ..llm import (
     resolve_backend,
 )
 from ..llm.client import LLMClient
-from ..llm.prompts import DEPTHS, EXTRAS
+from ..llm.prompts import DEPTH_HELP, DEPTHS, EXTRA_HELP, EXTRAS
 from ..models import StudyDocument
 from ..pdfio import sha256_file
 from ..pipeline import EXAM_CHAR_LIMIT, Inputs, retry_failed, run, save_debug, to_markdown
@@ -715,6 +715,10 @@ async def health() -> dict:
         # Arayüz seçenekleri buradan okur; tek kaynak prompts.py.
         "depths": list(DEPTHS),
         "extras": list(EXTRAS),
+        # Kullanıcıya gösterilen açıklamalar da aynı yerden — direktif
+        # değişip açıklama olduğu yerde kalırsa arayüz yalan söyler.
+        "depth_help": DEPTH_HELP,
+        "extra_help": EXTRA_HELP,
         # Hangi kimlik yolları kullanılabilir (API anahtarı / Claude Pro / demo).
         "backends": backend_status(),
     }

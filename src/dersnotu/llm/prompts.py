@@ -129,6 +129,32 @@ EXTRAS: dict[str, str] = {
 }
 
 
+# Arayüzde gösterilen kısa açıklamalar. Direktiflerin HEMEN YANINDA duruyorlar
+# ve arayüz bunları `/api/health` üzerinden okuyor — açıklama ikinci bir yerde
+# yazılı olsaydı direktif değişince sessizce yalan söylemeye başlardı.
+DEPTH_HELP: dict[str, str] = {
+    "özet": "Her maddeye en fazla bir paragraf. Türetme ve ispat yok: sonuç "
+            "verilir, nereden geldiği tek cümleyle söylenir. Tekrar için.",
+    "standart": "Varsayılan. Slayttaki her maddeyi somut sayısal bir örnek "
+                "üzerinden açar, takılacağın yeri önceden uyarır.",
+    "derin": "Her formülü adım adım türetir, ara adımı atlamaz. Kenar "
+             "durumlarını tek tek gösterir: taşma, işaret uzatma, sıfır, en "
+             "negatif değer. Kitaptaki alıştırmayı çözülmüş örnek olarak işler.",
+}
+
+EXTRA_HELP: dict[str, str] = {
+    "analoji": "Zor kavramı günlük hayattan bir benzetmeyle açar ve "
+               "benzetmenin NEREDE BOZULDUĞUNU da yazar — sınırı söylenmeyen "
+               "analoji öğrenciye yanlış model kurdurur.",
+    "örnek": "Her ana kavram için slayttakinden FARKLI, ek bir sayısal örneği "
+             "baştan sona adım adım çalıştırır.",
+    "soru": "Bölüm sonuna 3-5 soru ve yanıtlarını ekler. Hatırlatma değil "
+            "uygulama: hesapla, dönüştür, karşılaştır.",
+    "sözlük": "Bölümde geçen terimlerin Türkçe/İngilizce/anlam tablosunu ekler. "
+              "İngilizce sütunu kitapta ve sınavda geçen terimi tutar.",
+}
+
+
 def build_output_directives(language: str, depth: str, extras: list[str]) -> list[str]:
     """Kullanıcının seçtiği dil/derinlik/biçim direktiflerini satırlara çevirir."""
     lines: list[str] = []

@@ -215,6 +215,18 @@ button.act:hover{color:var(--danger);background:var(--paper)}
 @media(max-width:1000px){.grid3{grid-template-columns:1fr 1fr}}
 @media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}}
 
+/* ---- seçenek ipucu ----
+   `min-height` en uzun açıklamaya göre AYRILMIŞ, tahmin değil: ayrılmazsa
+   fare seçenekler üzerinde gezerken altındaki "Ders notu oluştur" düğmesi
+   satır satır zıplıyor ve kullanıcı tıklamak istediği yeri kaçırıyor.
+   1340 / 1000 / 820 px'de ölçülen en yüksek içerik 63px = 5.00em; üçünde de
+   aynı çıktı. Açıklama metni uzatılırsa bu değer yeniden ölçülmeli. */
+.modehint{margin:14px 0 0;padding-left:12px;border-left:2px solid var(--rule);
+          font-size:12.5px;color:var(--muted);line-height:1.65;min-height:5em}
+.modehint b{color:var(--ink);font-weight:600}
+.modehint .ek{display:block;margin-top:4px;font-family:var(--mono);
+              font-size:10.5px;opacity:.85}
+
 /* ---- tahmin şeridi ----
    Düğmenin hemen altında, kutu değil şerit: bu bir uyarı değil, bir fiyat
    etiketi. Kutulasaydık "dikkat et" derdi; asıl işi "artık basabilirsin". */
