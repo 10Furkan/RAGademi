@@ -13,11 +13,10 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import settings
+from .estimate import project
 from .index import BookIndex, chunk_book, estimate_tokens
-from .llm.client import PRICING, LLMClient
-from .llm.prompts import build_lecture_context
+from .llm.client import LLMClient
 from .pdfio import parse_book, parse_lecture, read_pages, sha256_file
-from .pdfio.render import render_pages
 from .pipeline import Inputs, run, save_debug, to_markdown
 
 app = typer.Typer(add_completion=False, help="Ders slaytlarını anlaşılır ders notuna çevirir.")
@@ -147,93 +146,40 @@ def estimate(
     if not BookIndex.is_built(settings.cache_dir, sha):
         console.print("[red]Önce kitabı indeksle:[/red] dersnotu index <kitap.pdf>")
         raise typer.Exit(code=1)
-    idx = BookIndex(BookIndex.path_for(settings.cache_dir, sha))
 
-    n_sections = len(lec.sections)
-    prefix_tokens = estimate_tokens(build_lecture_context(lec)) + 400  # +sistem promptu
-
-    # Görüntü tokenları: sabit varsayım yerine gerçekten render edilmiş
-    # piksel boyutundan hesaplanır (token ≈ genişlik×yükseklik/750).
-    visual = [s.number for s in lec.slides if s.is_visual]
-    sample = visual[:3]
-    px = (
-        render_pages(lecture, sample, max_edge=settings.slide_image_max_edge)
-        if sample
-        else {}
-    )
-    img_tokens_each = (
-        sum(p.token_estimate for p in px.values()) / len(px) if px else 0
-    )
-    image_tokens = len(visual) * img_tokens_each
-
-    # Bölüm başına değişken metin: slayt metni + alıntılar
-    avg_chunk = idx.conn.execute(
-        "SELECT AVG(token_estimate) FROM chunks"
-    ).fetchone()[0] or 900
-    per_section_text = sum(
-        estimate_tokens(s.raw_text) for s in lec.sections
-    ) / max(1, n_sections)
-    retrieval_tokens = settings.chunks_per_section * float(avg_chunk) * n_sections
-    section_text_tokens = per_section_text * n_sections
-
-    cache_write = prefix_tokens
-    cache_read = prefix_tokens * max(0, n_sections - 1)
-    plain_input = image_tokens + retrieval_tokens + section_text_tokens
-    output_tokens = n_sections * 3000  # bölüm başına ~2000 kelime
-
-    # Ucuz geçişler (konu kartları + hizalama)
-    cheap_input = estimate_tokens(build_lecture_context(lec)) + 8000
-    cheap_output = 4000
-
-    inp_price, out_price = PRICING.get(model, (3.0, 15.0))
-    cheap_in, cheap_out = PRICING.get(settings.cheap_model, (1.0, 5.0))
-
-    cost = (
-        cache_write * inp_price * 1.25
-        + cache_read * inp_price * 0.10
-        + plain_input * inp_price
-        + output_tokens * out_price
-        + cheap_input * cheap_in
-        + cheap_output * cheap_out
-    ) / 1_000_000
-
-    no_cache_cost = (
-        (prefix_tokens * n_sections + plain_input) * inp_price + output_tokens * out_price
-    ) / 1_000_000
+    # Hesabın tamamı `estimate.py`'de; burada yalnızca sunum var. Arayüzdeki
+    # şerit de aynı fonksiyonu çağırıyor, iki rakam ayrışamaz.
+    p = project(lec, lecture, settings, book_sha=sha, model=model)
 
     table = Table(title=f"Maliyet tahmini — {model}", show_header=True)
     table.add_column("Kalem")
     table.add_column("Token", justify="right")
-    table.add_row("Bölüm sayısı", str(n_sections))
-    table.add_row("Cache'lenen önek (1× yazma)", f"{cache_write:,.0f}")
-    table.add_row(f"Cache okuma ({n_sections - 1}×)", f"{cache_read:,.0f}")
+    table.add_row("Bölüm sayısı", str(p.sections))
+    table.add_row("Cache'lenen önek (1× yazma)", f"{p.cache_write:,.0f}")
+    table.add_row(f"Cache okuma ({p.sections - 1}×)", f"{p.cache_read:,.0f}")
     table.add_row(
-        f"Slayt görüntüleri ({len(visual)} adet × {img_tokens_each:,.0f})",
-        f"{image_tokens:,.0f}",
+        f"Slayt görüntüleri ({p.visual_slides} adet × {p.image_tokens_each:,.0f})",
+        f"{p.image_tokens:,.0f}",
     )
-    table.add_row("Kitap alıntıları", f"{retrieval_tokens:,.0f}")
-    table.add_row("Bölüm slayt metinleri", f"{section_text_tokens:,.0f}")
-    table.add_row("Çıktı", f"{output_tokens:,.0f}")
-    table.add_row("Ucuz geçişler (giriş/çıkış)", f"{cheap_input:,.0f} / {cheap_output:,.0f}")
+    table.add_row("Kitap alıntıları", f"{p.retrieval_tokens:,.0f}")
+    table.add_row("Bölüm slayt metinleri", f"{p.section_text_tokens:,.0f}")
+    table.add_row("Çıktı", f"{p.output_tokens:,.0f}")
+    table.add_row(
+        "Ucuz geçişler (giriş/çıkış)", f"{p.cheap_input:,.0f} / {p.cheap_output:,.0f}"
+    )
     console.print(table)
-    console.print(f"\n[bold green]Tahmini maliyet: ${cost:.2f}[/bold green] / ders")
-    console.print(f"[dim]Prompt caching olmasaydı: ${no_cache_cost:.2f}[/dim]")
-    if px:
-        s = next(iter(px.values()))
-        avg_kb = sum(len(p.png) for p in px.values()) / len(px) / 1024
+    console.print(f"\n[bold green]Tahmini maliyet: ${p.cost:.2f}[/bold green] / ders")
+    console.print(f"[dim]Prompt caching olmasaydı: ${p.no_cache_cost:.2f}[/dim]")
+    console.print(f"[dim]Tahmini süre: ~{p.seconds / 60:.0f} dk ({p.seconds_source})[/dim]")
+    if s := p.sample:
         console.print(
-            f"[dim]Örnek slayt render: {s.width}×{s.height}px, {avg_kb:.0f} KB "
-            f"→ ~{img_tokens_each:,.0f} token/slayt[/dim]"
+            f"[dim]Örnek slayt render: {s['width']}×{s['height']}px, {s['kb']} KB "
+            f"→ ~{s['tokens_each']:,} token/slayt[/dim]"
         )
-        halved = (
-            len(visual) * (s.width // 2) * (s.height // 2) / 750 * inp_price / 1_000_000
-        )
-        current = image_tokens * inp_price / 1_000_000
         console.print(
-            f"[dim]Uzun kenar 700px'e inseydi görüntü maliyeti "
-            f"${current:.2f} → ${halved:.2f}[/dim]"
+            f"[dim]Uzun kenar yarıya inseydi görüntü maliyeti "
+            f"${s['image_cost']:.2f} → ${s['halved_image_cost']:.2f}[/dim]"
         )
-    idx.close()
 
 
 # ---------------------------------------------------------------------------

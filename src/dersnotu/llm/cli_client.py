@@ -57,6 +57,20 @@ def _strip_cache_control(content: list[dict]) -> list[dict]:
     return [{k: v for k, v in block.items() if k != "cache_control"} for block in content]
 
 
+# Süreç genelinde en son görülen kota penceresi.
+#
+# Kota istemci örneğine değil ABONELİĞE ait: her iş kendi istemcisini kurup
+# attığı için `self.rate_limit` işle birlikte kaybolur ve arayüz "kotam ne
+# durumda" sorusunu asla yanıtlayamaz. Sorgulanabilir bir uç da yok — bilgi
+# yalnızca bir çağrının akışında geliyor, o yüzden geçerken yakalanıyor.
+_last_rate_limit: dict[str, Any] | None = None
+
+
+def last_rate_limit() -> dict[str, Any] | None:
+    """En son çağrıda bildirilen kota durumu; hiç çağrı olmadıysa None."""
+    return _last_rate_limit
+
+
 class ClaudeCodeClient:
     """`LLMClient` ile aynı yüzey; arkada `claude -p` alt süreci."""
 
@@ -219,7 +233,8 @@ class ClaudeCodeClient:
                             if on_delta:
                                 on_delta(text)
             elif kind == "rate_limit_event":
-                self.rate_limit = ev.get("rate_limit_info")
+                global _last_rate_limit
+                self.rate_limit = _last_rate_limit = ev.get("rate_limit_info")
             elif kind == "result":
                 result_ev = ev
 

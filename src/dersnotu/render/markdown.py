@@ -80,6 +80,7 @@ _CALLOUTS = {
     "analoji": ("callout-analogy", "Analoji"),
     "soru": ("callout-quiz", "Kendini sına"),
     "sözlük": ("callout-glossary", "Sözlük"),
+    "sınav": ("callout-exam", "Geçmiş sınavda"),
 }
 
 

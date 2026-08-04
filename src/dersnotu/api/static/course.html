@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dersnotu — ders</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+header{padding:34px 0 22px}
+.back{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+      color:var(--muted);text-decoration:none}
+.back:hover{color:var(--ink)}
+.title{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-top:16px}
+.title h1{font-size:clamp(26px,3.4vw,36px);margin:0;max-width:26ch}
+.title .kod{font-family:var(--mono);font-size:12px;letter-spacing:.14em;
+      text-transform:uppercase;color:var(--ink);
+      box-shadow:inset 0 -7px 0 -1px var(--marker);padding:0 2px}
+.title .acts{margin-left:auto;display:flex;gap:8px}
+.subnote{color:var(--muted);font-size:14px;margin:8px 0 0}
+
+.colhead{display:flex;justify-content:space-between;align-items:baseline;
+         margin-bottom:10px}
+.colhead .lab{margin:0}
+.drop.slim{min-height:44px;padding:11px 13px;font-size:12.5px;justify-content:center}
+.hint{font-size:12px;color:var(--muted);margin:10px 0 0}
+#out{margin-bottom:22px}
+.warn{font-family:var(--mono);font-size:10px;color:var(--danger);
+      border:1px solid var(--danger);border-radius:3px;padding:1px 6px;
+      letter-spacing:.06em;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="back" href="/">← Derslerim</a>
+    <div class="title">
+      <span class="kod" id="kod" hidden></span>
+      <h1 id="ad">…</h1>
+      <span class="acts">
+        <button class="ghost" id="duzenle">Düzenle</button>
+      </span>
+    </div>
+    <p class="subnote" id="not"></p>
+  </header>
+
+  <main>
+    <aside class="rail">
+      <h2 id="railbaslik">Ders özeti</h2>
+      <div id="steps"></div>
+      <div id="ozet"></div>
+      <div class="meta" id="meta" hidden></div>
+      <a class="dl" id="dl" hidden>PDF indir</a>
+      <div class="retry" id="retrybox" hidden>
+        <p class="why" id="retrywhy"></p>
+        <button type="button" id="retry">Eksik bölümleri tamamla</button>
+      </div>
+    </aside>
+
+    <div>
+      <!-- 1. Neyim var -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Materyaller</h2>
+        </div>
+        <p class="sub">Bir kez yükle, her ders notunda kullan. Kitap ilk seferde
+           indekslenir; sonraki üretimler hazır indeksten okur.</p>
+        <div class="grid3">
+          <div>
+            <div class="colhead">
+              <span class="lab">Ders slaytları</span>
+              <span class="lab" id="saySlayt"></span>
+            </div>
+            <div class="rows" id="lectures"></div>
+            <div class="drop slim" id="d-lecture">
+              <input type="file" accept="application/pdf" data-kind="lecture">
+              <span class="name">+ Slayt PDF'i yükle</span>
+            </div>
+          </div>
+          <div>
+            <div class="colhead">
+              <span class="lab">Ders kitapları</span>
+              <span class="lab" id="sayKitap"></span>
+            </div>
+            <div class="rows" id="books"></div>
+            <div class="drop slim" id="d-book">
+              <input type="file" accept="application/pdf" data-kind="book">
+              <span class="name">+ Kitap PDF'i yükle</span>
+            </div>
+          </div>
+          <div>
+            <div class="colhead">
+              <span class="lab">Geçmiş sınavlar</span>
+              <span class="lab" id="saySinav"></span>
+            </div>
+            <div class="rows" id="exams"></div>
+            <div class="drop slim" id="d-exam">
+              <input type="file" accept="application/pdf" data-kind="exam">
+              <span class="name">+ Sınav PDF'i yükle</span>
+            </div>
+            <p class="hint">İsteğe bağlı. Kapsamı değiştirmez — slaytta zaten
+               olan konulardan sınavda çıkmış olanları daha derin işler.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. Ne üreteyim -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Ders notu üret</h2>
+        </div>
+        <p class="sub" id="secim">Yukarıdan bir slayt ve bir kitap seç.</p>
+
+        <div class="modes">
+          <div>
+            <span class="lab">Kimlik</span>
+            <div class="seg" id="backends">
+              <label><input type="radio" name="backend" value="api"><span>API anahtarı</span></label>
+              <label><input type="radio" name="backend" value="cli"><span>Claude Pro</span></label>
+              <label><input type="radio" name="backend" value="demo" checked><span>Demo</span></label>
+            </div>
+          </div>
+          <div>
+            <span class="lab">Derinlik</span>
+            <div class="seg">
+              <label><input type="radio" name="depth" value="özet"><span>Özet</span></label>
+              <label><input type="radio" name="depth" value="standart" checked><span>Standart</span></label>
+              <label><input type="radio" name="depth" value="derin"><span>Derin</span></label>
+            </div>
+          </div>
+          <div>
+            <span class="lab">Dil</span>
+            <div class="seg">
+              <label><input type="radio" name="language" value="Türkçe" checked><span>Türkçe</span></label>
+              <label><input type="radio" name="language" value="English"><span>English</span></label>
+              <label><input type="radio" name="language" value="Deutsch"><span>Deutsch</span></label>
+            </div>
+          </div>
+          <div>
+            <span class="lab">Ek anlatım</span>
+            <div class="chips">
+              <label><input type="checkbox" name="extras" value="analoji"><span>Analoji</span></label>
+              <label><input type="checkbox" name="extras" value="örnek"><span>Ek örnek</span></label>
+              <label><input type="checkbox" name="extras" value="soru"><span>Kendini sına</span></label>
+              <label><input type="checkbox" name="extras" value="sözlük"><span>Sözlük</span></label>
+            </div>
+          </div>
+        </div>
+
+        <div class="opts" style="margin-top:18px">
+          <label>İlk <input class="num" type="number" name="sections" value="0" min="0" max="40">
+                 bölüm (0 = hepsi)</label>
+          <span id="cred"></span>
+          <button id="go" style="margin-left:auto" disabled>Ders notu oluştur</button>
+        </div>
+
+        <!-- Basmadan önce ne ödeyeceğini gör. Boşken hiç yer kaplamaz. -->
+        <div class="tahmin" id="tahmin" hidden></div>
+      </section>
+
+      <!-- 3. Canlı çıktı: bir iş başlayana kadar yok -->
+      <section class="out empty" id="out" hidden></section>
+
+      <!-- 4. Ne ürettim -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Ders notları</h2>
+          <span class="lab" id="sayNot"></span>
+        </div>
+        <div class="search">
+          <input type="text" id="q" autocomplete="off"
+                 placeholder="Bu dersin tüm notlarında ara — ör. ikinin tümleyeni">
+          <button class="ghost" id="qclear" hidden>temizle</button>
+        </div>
+        <div class="rows" id="docs"></div>
+        <div id="hits" hidden></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<dialog id="dlg">
+  <form id="editform">
+    <h2 style="margin:0 0 18px;font-size:20px">Dersi düzenle</h2>
+    <div class="field" style="margin-bottom:14px">
+      <span class="lab">Ders adı</span>
+      <input type="text" name="name" required maxlength="120">
+    </div>
+    <div class="field" style="margin-bottom:14px">
+      <span class="lab">Ders kodu</span>
+      <input type="text" name="code" maxlength="24">
+    </div>
+    <div class="field">
+      <span class="lab">Not</span>
+      <input type="text" name="note" maxlength="200">
+    </div>
+    <div style="display:flex;gap:10px;justify-content:space-between;margin-top:22px">
+      <button type="button" class="ghost danger" id="dersSil">Dersi sil</button>
+      <span style="display:flex;gap:10px">
+        <button type="button" class="ghost" id="iptal">Vazgeç</button>
+        <button type="submit">Kaydet</button>
+      </span>
+    </div>
+  </form>
+</dialog>
+<style>dialog{border:1px solid var(--rule);border-radius:6px;background:var(--surface);
+  color:var(--ink);padding:26px 28px;max-width:420px;width:calc(100% - 40px)}
+dialog::backdrop{background:rgba(20,22,26,.45)}</style>
+
+<script>
+const CID = location.pathname.split("/").filter(Boolean).pop();
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g,
+  c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const outEl = $("#out"), metaEl = $("#meta"), dlEl = $("#dl");
+let ders = null, sections = {}, calisiyor = false;
+
+const boyut = b => b > 1048576 ? (b / 1048576).toFixed(1) + " MB"
+                               : Math.max(1, Math.round(b / 1024)) + " KB";
+const tarih = s => new Date(s).toLocaleDateString("tr",
+  { day: "numeric", month: "short", year: "numeric" });
+// Dakikaya yuvarlamak kısa koşuları "0 dk" diye gösteriyordu — bozuk görünüyor
+// ve demo koşularının hepsi öyle.
+const sure = s => s < 60 ? `${Math.round(s)} sn` : `${Math.round(s / 60)} dk`;
+
+// --- ders yükle -----------------------------------------------------------
+function sayfaHatasi(mesaj){
+  document.querySelector("main").innerHTML =
+    `<div class="err" style="grid-column:1/-1">${mesaj}</div>`;
+}
+
+async function yukle(){
+  let r;
+  try {
+    r = await fetch(`/api/courses/${CID}`);
+  } catch {
+    sayfaHatasi("Sunucuya ulaşılamadı. Kapanmış olabilir — terminalde "
+      + "<code>dersnotu serve</code> ile başlat."); return;
+  }
+  if (r.status === 404) { sayfaHatasi("Bu ders bulunamadı; silinmiş olabilir. "
+    + '<a href="/">Derslerime dön</a>.'); return; }
+  if (!r.ok) { sayfaHatasi(`Ders yüklenemedi (HTTP ${r.status}).`); return; }
+  ders = await r.json();
+  document.title = `${ders.name} — dersnotu`;
+  $("#ad").textContent = ders.name;
+  $("#kod").hidden = !ders.code; $("#kod").textContent = ders.code;
+  $("#not").textContent = ders.note || "";
+  cizMateryal(); cizDokuman(); cizOzet(); tazeleSecim();
+}
+
+function materyalHTML(m, group){
+  const alt = [m.pages ? `${m.pages} sayfa` : null, boyut(m.size),
+               m.indexed ? "indekslendi" : null].filter(Boolean).join(" · ");
+  return `<label class="pick">
+    <input type="radio" name="${group}" value="${m.id}">
+    <span class="pb">
+      <span class="dot"></span>
+      <span class="grow">
+        <span class="nm">${esc(m.name)}</span>
+        <span class="mt">${alt}</span>
+      </span>
+      <span class="acts">
+        <a class="act" href="/api/materials/${m.id}/download">indir</a>
+        <button class="act" type="button" data-delmat="${m.id}"
+                data-name="${esc(m.name)}">sil</button>
+      </span>
+    </span>
+  </label>`;
+}
+
+function cizMateryal(){
+  const bos = t => `<p class="empty-note">${t}</p>`;
+  $("#lectures").innerHTML = ders.lectures.length
+    ? ders.lectures.map(m => materyalHTML(m, "lecture_id")).join("")
+    : bos("Henüz slayt yok.");
+  $("#books").innerHTML = ders.books.length
+    ? ders.books.map(m => materyalHTML(m, "book_id")).join("")
+    : bos("Henüz kitap yok.");
+  // Sınav seçimi isteğe bağlı, o yüzden listede açık bir "kullanma" seçeneği
+  // var: seçili radyoyu geri almanın gizli bir yolunu aramak zorunda kalma.
+  $("#exams").innerHTML = ders.exams.length
+    ? `<label class="pick"><input type="radio" name="exam_id" value="" checked>
+         <span class="pb"><span class="dot"></span>
+         <span class="grow"><span class="nm">Kullanma</span></span></span></label>`
+      + ders.exams.map(m => materyalHTML(m, "exam_id")).join("")
+    : bos("Henüz sınav kâğıdı yok.");
+
+  $("#saySlayt").textContent = ders.lectures.length || "";
+  $("#sayKitap").textContent = ders.books.length || "";
+  $("#saySinav").textContent = ders.exams.length || "";
+
+  // En son yüklenen makul bir varsayılan; tek dosya varsa seçim zaten tek.
+  for (const [g, list] of [["lecture_id", ders.lectures], ["book_id", ders.books]])
+    if (list.length) document.querySelector(`input[name="${g}"]`).checked = true;
+
+  $$("[data-delmat]").forEach(b => b.addEventListener("click", silMateryal));
+  $$('input[name="lecture_id"],input[name="book_id"],input[name="exam_id"]')
+    .forEach(i => i.addEventListener("change", tazeleSecim));
+}
+
+function dokumanHTML(d){
+  const eksik = (d.failed_sections || []).length;
+  const alt = [tarih(d.created_at), d.depth, (d.extras || []).join(", "),
+               d.exam_id ? "sınav odaklı" : null,
+               d.backend === "demo" ? "demo" : null,
+               d.duration ? sure(d.duration) : null,
+              ].filter(Boolean).join(" · ");
+  const acts = [
+    d.has_html ? `<a class="act oku" href="/ders/${CID}/not/${d.id}">oku</a>` : "",
+    d.has_pdf ? `<a class="act" href="/api/documents/${d.id}/download">pdf</a>` : "",
+    d.has_md ? `<a class="act" href="/api/documents/${d.id}/download?fmt=md">md</a>` : "",
+    d.can_retry ? `<button class="act" type="button" data-retrydoc="${d.id}">tamamla</button>` : "",
+    `<button class="act" type="button" data-deldoc="${d.id}" data-name="${esc(d.title)}">sil</button>`,
+  ].join("");
+  return `<div class="row">
+    <span class="grow">
+      <span class="nm">${esc(d.title)}</span>
+      <span class="mt">${alt}</span>
+    </span>
+    ${eksik ? `<span class="warn">${eksik} bölüm eksik</span>` : ""}
+    <span class="acts">${acts}</span>
+  </div>`;
+}
+
+function cizDokuman(){
+  $("#docs").innerHTML = ders.documents.length
+    ? ders.documents.map(dokumanHTML).join("")
+    : `<p class="empty-note">Henüz ders notu üretilmedi.</p>`;
+  $("#sayNot").textContent = ders.documents.length || "";
+  $$("[data-deldoc]").forEach(b => b.addEventListener("click", silDokuman));
+  $$("[data-retrydoc]").forEach(b => b.addEventListener("click", tamamla));
+}
+
+function cizOzet(){
+  if (calisiyor) return;
+  const n = ders.counts;
+  $("#railbaslik").textContent = "Ders özeti";
+  $("#ozet").innerHTML = `<div class="meta" style="margin-top:0;border-top:none;padding-top:0">
+    slayt <b>${n.lectures}</b><br>kitap <b>${n.books}</b><br>
+    ders notu <b>${n.documents}</b><br>
+    oluşturuldu <b>${tarih(ders.created_at)}</b></div>`;
+}
+
+const secili = g => document.querySelector(`input[name="${g}"]:checked`);
+const deger = g => (secili(g) || {}).value || "";
+
+function tazeleSecim(){
+  const l = secili("lecture_id"), b = secili("book_id");
+  const hepsi = [...ders.lectures, ...ders.books, ...ders.exams];
+  const ad = id => (hepsi.find(m => m.id === id) || {}).name;
+  $("#go").disabled = !(l && b) || calisiyor;
+  const sinav = deger("exam_id");
+  $("#secim").innerHTML = (l && b)
+    ? `<b>${esc(ad(l.value))}</b> slaytları, <b>${esc(ad(b.value))}</b> kitabından anlatılacak`
+      + (sinav ? `, <b>${esc(ad(sinav))}</b> sorularına göre derinleştirilecek.` : ".")
+    : "Yukarıdan bir slayt ve bir kitap seç.";
+  tahminIste();
+}
+
+// --- maliyet / süre / kota şeridi ----------------------------------------
+// Ders PDF'ini ayrıştırmak birkaç saniye; her tıklamada istek atmamak için
+// geciktiriliyor. Sunucu tarafında da SHA'ya göre önbellek var.
+let tahminZaman = null, tahminSira = 0;
+
+function tahminIste(){
+  const l = secili("lecture_id"), b = secili("book_id");
+  const kutu = $("#tahmin");
+  if (!(l && b) || calisiyor) { kutu.hidden = true; return; }
+  clearTimeout(tahminZaman);
+  kutu.hidden = false;
+  kutu.className = "tahmin bekliyor";
+  kutu.textContent = "hesaplanıyor…";
+  const sira = ++tahminSira;
+  tahminZaman = setTimeout(async () => {
+    const p = new URLSearchParams({
+      lecture_id: l.value, book_id: b.value, exam_id: deger("exam_id"),
+      backend: deger("backend") || "auto", sections: $('[name="sections"]').value || "0",
+    });
+    try {
+      const r = await fetch(`/api/estimate?${p}`);
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      const t = await r.json();
+      if (sira !== tahminSira) return;  // daha yeni bir seçim var
+      cizTahmin(t);
+    } catch (err) {
+      if (sira !== tahminSira) return;
+      kutu.className = "tahmin";
+      kutu.textContent = `tahmin yapılamadı — ${err.message}`;
+    }
+  }, 350);
+}
+
+function cizTahmin(t){
+  const kutu = $("#tahmin");
+  kutu.className = "tahmin";
+  const dk = t.seconds < 90 ? `${Math.round(t.seconds)} sn` : `${Math.round(t.seconds / 60)} dk`;
+  const tok = (t.tokens.total_input / 1000).toFixed(0);
+  const bedel = t.backend === "cli"
+    ? "<b>abonelik kotası</b> (token ücreti yok)"
+    : t.backend === "demo"
+      ? "<b>ücretsiz</b> (model çağrılmaz)"
+      : `<b>~$${t.cost.toFixed(2)}</b>`;
+  const parcalar = [
+    `<b>${t.sections}</b> bölüm`,
+    `~<b>${tok}K</b> token giriş`,
+    bedel,
+    `~<b>${dk}</b>${t.seconds_source === "geçmiş" ? " (geçmiş koşulardan)" : ""}`,
+  ];
+  let not = "";
+  if (!t.book_indexed)
+    not += `<span class="tnote">Kitap ilk kez indekslenecek — süreye
+            ~${Math.round(t.index_seconds / 60)} dk eklendi, sonraki üretimlerde yok.</span>`;
+  const kota = kotaMetni(t.quota);
+  if (t.backend === "cli" && kota) not += `<span class="tnote">${kota}</span>`;
+  kutu.innerHTML = parcalar.join(" <span class='sep'>·</span> ") + not;
+}
+
+// Kota bilgisinin şeması belgelenmiş değil — yalnızca `five_hour` penceresi ve
+// `resetsAt` alanı ölçümle biliniyor. Bilinmeyen alan uydurmak yerine ne
+// varsa o gösteriliyor; ham nesne title'da duruyor.
+function kotaMetni(q){
+  if (!q) return "";
+  const w = q.five_hour || q;
+  const ne = [];
+  const yuzde = w.remaining_percent ?? w.remainingPercent ?? w.percent_remaining;
+  if (typeof yuzde === "number") ne.push(`kota %${Math.round(yuzde)}`);
+  const reset = w.resetsAt ?? w.resets_at;
+  if (reset) {
+    const d = new Date(typeof reset === "number" ? reset * 1000 : reset);
+    if (!isNaN(d)) ne.push(`sıfırlanma ${d.toLocaleTimeString("tr",
+      { hour: "2-digit", minute: "2-digit" })}`);
+  }
+  if (!ne.length) return "";
+  return `<span title="${esc(JSON.stringify(q))}">5 saatlik pencere — ${ne.join(", ")}</span>`;
+}
+
+// --- yükleme --------------------------------------------------------------
+// Liste kutuların KENDİSİNDEN türetiliyor: elle yazılan bir dizi, yeni bir
+// materyal türü eklendiğinde sessizce eksik kalıyor — sınav kutusu tam olarak
+// böyle dinleyicisiz kalmıştı ve yükleme hiç başlamıyordu.
+for (const box of $$(".drop")) {
+  const input = box.querySelector("input");
+  box.addEventListener("click", () => input.click());
+  box.addEventListener("dragover", e => { e.preventDefault(); box.classList.add("over"); });
+  box.addEventListener("dragleave", () => box.classList.remove("over"));
+  box.addEventListener("drop", e => {
+    e.preventDefault(); box.classList.remove("over");
+    input.files = e.dataTransfer.files; input.dispatchEvent(new Event("change"));
+  });
+  input.addEventListener("change", () => input.files[0] && gonder(box, input));
+}
+
+async function gonder(box, input){
+  const f = input.files[0], etiket = box.querySelector(".name");
+  const eski = etiket.textContent;
+  etiket.textContent = `${f.name} yükleniyor…`;
+  box.classList.add("has");
+  const fd = new FormData();
+  fd.set("kind", input.dataset.kind); fd.set("file", f);
+  try {
+    const r = await fetch(`/api/courses/${CID}/materials`, { method: "POST", body: fd });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    await yukle();
+  } catch (err) {
+    alert("Yüklenemedi: " + err.message);
+  } finally {
+    etiket.textContent = eski; box.classList.remove("has");
+    input.value = "";  // aynı dosyayı tekrar seçmek de change tetiklesin
+  }
+}
+
+// --- silme ----------------------------------------------------------------
+async function silMateryal(e){
+  e.preventDefault(); e.stopPropagation();
+  const { delmat: id, name } = e.currentTarget.dataset;
+  if (!confirm(`"${name}" silinsin mi?\n\nBu dosyadan üretilmiş ders notları kalır,`
+             + " ama eksik bölümleri tamamlanamaz.")) return;
+  const r = await fetch(`/api/materials/${id}`, { method: "DELETE" });
+  if (!r.ok) { alert("Silinemedi."); return; }
+  yukle();
+}
+
+async function silDokuman(e){
+  e.preventDefault(); e.stopPropagation();
+  const { deldoc: id, name } = e.currentTarget.dataset;
+  if (!confirm(`"${name}" ders notu silinsin mi?\n\nPDF ve Markdown dosyaları da silinir.`)) return;
+  const r = await fetch(`/api/documents/${id}`, { method: "DELETE" });
+  if (!r.ok) { alert("Silinemedi."); return; }
+  yukle();
+}
+
+// --- kimlik yolları -------------------------------------------------------
+fetch("/api/health").then(r => r.json()).then(h => {
+  const b = h.backends || {};
+  for (const key of ["api", "cli", "demo"]) {
+    const input = document.querySelector(`input[name="backend"][value="${key}"]`);
+    const info = b[key] || { available: false };
+    input.disabled = !info.available;
+    const label = input.closest("label");
+    label.classList.toggle("off", !info.available);
+    label.title = info.available ? info.label : `${info.label} — kullanılamıyor`;
+  }
+  const resolved = b.resolved || "demo";
+  const pick = document.querySelector(`input[name="backend"][value="${resolved}"]`);
+  if (pick && !pick.disabled) pick.checked = true;
+  const notlar = {
+    api: `model: ${h.model}`,
+    cli: "Claude Pro aboneliği — token ücreti yok, kota harcanır",
+    demo: "API çağrısı yapılmaz",
+  };
+  $("#cred").innerHTML = resolved === "demo"
+    ? `<span class="badge">kimlik yok — demo modu</span>`
+    : `<span style="font-family:var(--mono);font-size:10.5px">${notlar[resolved]}</span>`;
+});
+
+// --- üretim ---------------------------------------------------------------
+const STEPS = [
+  ["lecture",  "Slaytlar ayrıştırılıyor"],
+  ["book",     "Kitap indeksleniyor"],
+  ["topics",   "Konu kartları çıkarılıyor"],
+  ["align",    "Kitapla eşleştiriliyor"],
+  ["section",  "Bölümler yazılıyor"],
+  ["render",   "PDF basılıyor"],
+];
+const state = {};
+
+function drawSteps(){
+  $("#steps").innerHTML = STEPS.map(([k, label]) => {
+    const st = state[k] || {};
+    const cls = st.done ? "done" : st.active ? "active" : "";
+    const tick = st.done ? "✓" : st.active ? "▸" : "·";
+    return `<div class="step ${cls}"><span class="tick">${tick}</span>
+      <span>${label}${st.detail ? `<span class="detail">${st.detail}</span>` : ""}</span></div>`;
+  }).join("");
+}
+
+function sectionEl(i){
+  if (sections[i]) return sections[i];
+  if (outEl.classList.contains("empty")) { outEl.classList.remove("empty"); outEl.innerHTML = ""; }
+  const el = document.createElement("div");
+  el.className = "sec writing";
+  el.innerHTML = `<div class="tag">Bölüm ${i + 1} yazılıyor</div><pre></pre>`;
+  outEl.appendChild(el);
+  sections[i] = el;
+  return el;
+}
+
+function bosalt(mesaj){
+  calisiyor = true;
+  sections = {};
+  for (const k in state) delete state[k];
+  $("#railbaslik").textContent = "İlerleme";
+  $("#ozet").innerHTML = "";
+  $("#go").disabled = true; $("#go").textContent = "Çalışıyor…";
+  metaEl.hidden = true; dlEl.hidden = true; $("#retrybox").hidden = true;
+  $("#tahmin").hidden = true;  // koşu başladı, tahminin işi bitti
+  outEl.hidden = false; outEl.className = "out empty"; outEl.textContent = mesaj;
+  drawSteps();
+}
+
+// Kimlik ve bölüm sınırı da tahmini değiştirir: ikisi de fiyatın ve sürenin
+// girdisi. Yalnızca dosya seçimini dinlemek yanlış rakam gösterirdi.
+$$('input[name="backend"]').forEach(i => i.addEventListener("change", tahminIste));
+$('[name="sections"]').addEventListener("input", tahminIste);
+
+function bitti(){
+  calisiyor = false;
+  $("#go").textContent = "Ders notu oluştur";
+  tazeleSecim();
+}
+
+// Bir işi baştan sona izler. İlk üretim ve yeniden deneme aynı yoldan geçer;
+// yeniden deneme de canlı akış ve ilerleme rayı görsün.
+function follow(job){
+  const es = new EventSource(`/api/jobs/${job.id}/events`);
+  es.onmessage = ev => {
+    const d = JSON.parse(ev.data);
+    const [group] = d.type.split(":");
+
+    if (d.type === "section:delta") {
+      const el = sectionEl(d.index);
+      el.querySelector("pre").textContent += d.text;
+      el.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    if (d.type === "section:start") {
+      state.section = { active: true, detail: d.detail }; drawSteps(); return;
+    }
+    if (d.type === "section:done") {
+      const m = /^B(\d+)/.exec(d.detail || "");
+      if (m) {
+        const el = sectionEl(+m[1]);
+        el.classList.remove("writing");
+        el.querySelector(".tag").textContent = d.detail.includes("HATA")
+          ? `Bölüm ${+m[1] + 1} — üretilemedi` : `Bölüm ${+m[1] + 1}`;
+      }
+      return;
+    }
+    if (["lecture", "book", "topics", "align", "render"].includes(group)) {
+      state[group] = { active: true, detail: d.detail || "" };
+      if (d.type.endsWith(":done") || d.type.endsWith(":cached"))
+        state[group] = { done: true, detail: d.detail || "" };
+      drawSteps(); return;
+    }
+    if (d.type === "job:done") {
+      Object.values(state).forEach(s => { s.done = true; s.active = false; });
+      state.render = { done: true, detail: "hazır" };
+      drawSteps();
+      const u = d.usage || {};
+      metaEl.hidden = false;
+      metaEl.innerHTML = `çağrı <b>${u.calls || 0}</b><br>
+        giriş <b>${(u.input_tokens || 0).toLocaleString("tr")}</b> token<br>
+        çıkış <b>${(u.output_tokens || 0).toLocaleString("tr")}</b> token<br>
+        cache okuma <b>${(u.cache_read_tokens || 0).toLocaleString("tr")}</b>`;
+      dlEl.hidden = false; dlEl.href = `/api/jobs/${job.id}/download`;
+      showRetry(d);
+      bitti();
+      yukle();  // ders notu listesine yeni satır
+    }
+    if (d.type === "job:failed") {
+      outEl.className = "out";
+      outEl.innerHTML = `<div class="err">${esc(d.error)}</div>`;
+      bitti();
+    }
+    if (d.type === "stream:end") es.close();
+  };
+  es.onerror = () => { es.close(); bitti(); };
+}
+
+// --- eksik bölümleri tamamlama -------------------------------------------
+let sonDoc = null;
+
+function showRetry(d){
+  const box = $("#retrybox");
+  // Yeniden deneme kalıcı dokümana bakar (sunucu yeniden başlasa da çalışır);
+  // dosya adı iş kimliği değil doküman kimliğidir.
+  sonDoc = d.can_retry ? ((d.params || {}).out_stem || d.id) : null;
+  if (!sonDoc) { box.hidden = true; return; }
+  const f = d.failed_sections || [];
+  $("#retrywhy").textContent =
+    `${f.length} bölüm üretilemedi (${f.map(i => `Bölüm ${i + 1}`).join(", ")}). `
+    + "Yalnızca bunlar yeniden denenir; başarılı bölümler yeniden üretilmez.";
+  $("#retry").disabled = false;
+  $("#retry").textContent = "Eksik bölümleri tamamla";
+  box.hidden = false;
+}
+
+async function denemeBaslat(docId, btn){
+  bosalt("Eksik bölümler yeniden üretiliyor…");
+  try {
+    const r = await fetch(`/api/documents/${docId}/retry`, { method: "POST" });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    $("#retrybox").hidden = true;
+    follow(await r.json());
+  } catch (err) {
+    outEl.className = "out"; outEl.innerHTML = `<div class="err">${esc(err.message)}</div>`;
+    if (btn) btn.disabled = false;
+    bitti();
+  }
+}
+
+$("#retry").addEventListener("click", () => {
+  if (!sonDoc) return;
+  $("#retry").disabled = true;
+  denemeBaslat(sonDoc, $("#retry"));
+});
+
+function tamamla(e){
+  e.preventDefault();
+  const b = e.currentTarget;
+  b.disabled = true;
+  denemeBaslat(b.dataset.retrydoc, b);
+}
+
+$("#go").addEventListener("click", async () => {
+  const l = secili("lecture_id"), b = secili("book_id");
+  if (!l || !b) return;
+  bosalt("Başlatılıyor…");
+  const fd = new FormData();
+  fd.set("course_id", CID);
+  fd.set("lecture_id", l.value);
+  fd.set("book_id", b.value);
+  fd.set("exam_id", deger("exam_id"));
+  fd.set("language", secili("language").value);
+  fd.set("backend", secili("backend").value);
+  fd.set("depth", secili("depth").value);
+  fd.set("sections", $('[name="sections"]').value || "0");
+  for (const cb of $$('input[name="extras"]:checked')) fd.append("extras", cb.value);
+  try {
+    const r = await fetch("/api/jobs", { method: "POST", body: fd });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    follow(await r.json());
+  } catch (err) {
+    outEl.className = "out"; outEl.innerHTML = `<div class="err">${esc(err.message)}</div>`;
+    bitti();
+  }
+});
+
+// --- arama ----------------------------------------------------------------
+let aramaZaman = null;
+
+function cizHits(veri){
+  const kutu = $("#hits");
+  if (!veri.hits.length) {
+    kutu.innerHTML = `<p class="empty-note">“${esc(veri.query)}” için sonuç yok.
+      Arama yalnızca üretilmiş ders notlarında çalışır.</p>`;
+    return;
+  }
+  // snippet() sunucudan <mark> ile geliyor; gövde bu yüzden kaçırılmıyor,
+  // ama başlık ve kullanıcının sorgusu HER ZAMAN kaçırılıyor.
+  kutu.innerHTML = `<p class="lab">${veri.hits.length} sonuç</p>` + veri.hits.map(h =>
+    `<a class="hit" href="/ders/${CID}/not/${h.document_id}#bolum-${h.section}">
+       <span class="hh">${esc(h.heading)}</span>
+       <span class="hd">${esc(h.document_title)}</span>
+       <span class="hs">${h.snippet}</span>
+     </a>`).join("");
+}
+
+async function ara(){
+  const q = $("#q").value.trim();
+  $("#qclear").hidden = !q;
+  $("#docs").hidden = !!q;
+  $("#hits").hidden = !q;
+  if (!q) return;
+  try {
+    const r = await fetch(`/api/courses/${CID}/search?q=${encodeURIComponent(q)}`);
+    if (!r.ok) throw new Error(r.statusText);
+    cizHits(await r.json());
+  } catch (err) {
+    $("#hits").innerHTML = `<div class="err">Arama yapılamadı: ${esc(err.message)}</div>`;
+  }
+}
+
+$("#q").addEventListener("input", () => {
+  clearTimeout(aramaZaman);
+  aramaZaman = setTimeout(ara, 220);
+});
+$("#qclear").addEventListener("click", () => { $("#q").value = ""; ara(); });
+
+// --- ders düzenle ---------------------------------------------------------
+$("#duzenle").addEventListener("click", () => {
+  const f = $("#editform");
+  f.name.value = ders.name; f.code.value = ders.code; f.note.value = ders.note;
+  $("#dlg").showModal();
+});
+$("#iptal").addEventListener("click", () => $("#dlg").close());
+
+$("#editform").addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = e.target;
+  const r = await fetch(`/api/courses/${CID}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: f.name.value, code: f.code.value, note: f.note.value }),
+  });
+  if (!r.ok) { alert((await r.json()).detail || "Kaydedilemedi."); return; }
+  $("#dlg").close();
+  yukle();
+});
+
+$("#dersSil").addEventListener("click", async () => {
+  const n = ders.counts;
+  const ne = [n.lectures && `${n.lectures} slayt`, n.books && `${n.books} kitap`,
+              n.documents && `${n.documents} ders notu`].filter(Boolean).join(", ");
+  if (!confirm(`"${ders.name}" dersi silinsin mi?`
+    + (ne ? `\n\nBirlikte silinecekler: ${ne}.` : "") + "\n\nBu geri alınamaz.")) return;
+  const r = await fetch(`/api/courses/${CID}`, { method: "DELETE" });
+  if (!r.ok) { alert("Silinemedi."); return; }
+  location.href = "/";
+});
+
+yukle();
+</script>
+</body>
+</html>

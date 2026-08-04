@@ -40,6 +40,27 @@ python -m venv .venv
 
 Sonra <http://127.0.0.1:8000>.
 
+Ana sayfada derslerin durur. Bir ders açtığında o derse ait her şey bir arada:
+yüklediğin slaytlar, kitaplar, geçmiş sınavlar ve o güne kadar ürettiğin ders
+notları. Dosyaları bir kez yükle, her üretimde listeden seç.
+
+Kitaplar içerik adresli saklanır: aynı kitabı iki derse eklemek diskte ikinci
+bir kopya açmaz ve kitabı ikinci kez indekslemez.
+
+**Üret'e basmadan ne ödeyeceğini görürsün** — bölüm sayısı, token, ücret ve
+süre. Süre tahmini kendi geçmiş koşularından kalibre olur; abonelik yolunda
+fiyat yerine kalan kota gösterilir.
+
+**Ders notunu indirmeden okuyabilirsin.** Okuyucu PDF'le birebir aynı render:
+kenar rayında atıflar, kitaptan kırpılmış şekiller, KaTeX matematik. Üstteki
+arama kutusu dersin **tüm** notlarında arar ve seni doğrudan ilgili bölüme
+götürür.
+
+**Geçmiş sınav kâğıdı yükleyebilirsin.** Kapsamı değiştirmez — sınavdan
+sorumlu olduğun şey hâlâ slaytlardır. Yaptığı, slaytta zaten olan bir konu
+geçmiş sınavda çıkmışsa onu daha derin işlemek ve soruyu birebir alıntılayarak
+işaretlemek. Alıntılayamıyorsa iddia da etmez.
+
 ### Kimlik: API anahtarı veya Claude Pro
 
 | Arka uç | Kimlik | Ücret |
@@ -89,7 +110,11 @@ Kitap indeksi içerik adreslidir (`.cache/book-<sha>.sqlite`): aynı kitap bir k
 indekslenir, sonraki tüm dersler hazır indeksi kullanır.
 
 Bir bölüm patlarsa doküman ölmez — o bölüm ⚠️ ile işaretlenir, kalanlar devam
-eder, sonra `retry` ile yalnızca eksikler yeniden üretilir.
+eder, sonra yalnızca eksikler yeniden üretilir. Bu, sunucu kapansa bile
+geçerli: ders sayfasındaki eksik ders notunun yanında "tamamla" düğmesi durur.
+
+Dersler, materyaller ve üretilmiş dokümanlar `.cache/library.sqlite` içinde;
+`.cache` altında olsa da silinebilir bir önbellek değil, ders listen orada.
 
 ## Geliştirme
 

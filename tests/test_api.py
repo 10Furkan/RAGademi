@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from dersnotu.api.jobs import Event, JobStatus, JobStore
 from dersnotu.api.server import app
+from dersnotu.library import LibraryStore
 
 LECTURE = Path("Lecture02 - Bitsints.pptx.pdf")
 BOOK = Path("CSAPP_2016.pdf")
@@ -78,7 +79,18 @@ def _wait(cond, timeout=5.0):
 
 # --- HTTP uçları -----------------------------------------------------------
 @pytest.fixture
-def client():
+def client(tmp_path, monkeypatch):
+    """Kitaplığı geçici dizine alır.
+
+    Aksi hâlde testler kullanıcının gerçek `.cache/library.sqlite` dosyasına
+    ders yazar — bir test paketi kullanıcının ders listesini kirletmemeli.
+    """
+    from dersnotu.api import server
+
+    monkeypatch.setattr(
+        server, "library",
+        LibraryStore(tmp_path / "library.sqlite", tmp_path / "materials"),
+    )
     with TestClient(app) as c:
         yield c
 
@@ -94,7 +106,14 @@ def test_index_page_served(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "dersnotu" in r.text
-    assert "EventSource" in r.text  # SSE istemcisi gömülü
+    assert "/api/courses" in r.text  # ders listesi istemcisi gömülü
+
+
+def test_course_page_served(client):
+    """Ders sayfası tek dosya; kimlik URL'den okunuyor, sunucu şablon basmıyor."""
+    r = client.get("/ders/hangisiolursa")
+    assert r.status_code == 200
+    assert "EventSource" in r.text  # SSE istemcisi burada
 
 
 def test_unknown_job_returns_404(client):
@@ -201,6 +220,313 @@ def test_job_dict_reports_retry_capability():
     assert job.to_dict()["can_retry"] is False  # doküman diskte yok
     job.doc_path = Path(__file__)  # var olan bir dosya
     assert job.to_dict()["can_retry"] is True
+
+
+# --- ders kitaplığı --------------------------------------------------------
+def _course(client, name="Bilgisayar Sistemleri", code="BLG 212"):
+    r = client.post("/api/courses", json={"name": name, "code": code})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _material(client, cid, kind, name="a.pdf"):
+    r = client.post(
+        f"/api/courses/{cid}/materials",
+        data={"kind": kind},
+        files={"file": (name, b"%PDF-govde", "application/pdf")},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_course_create_list_delete(client):
+    c = _course(client)
+    assert c["code"] == "BLG 212"
+    assert [x["id"] for x in client.get("/api/courses").json()] == [c["id"]]
+
+    assert client.delete(f"/api/courses/{c['id']}").status_code == 200
+    assert client.get("/api/courses").json() == []
+    assert client.get(f"/api/courses/{c['id']}").status_code == 404
+
+
+def test_blank_course_name_rejected(client):
+    assert client.post("/api/courses", json={"name": "  "}).status_code == 400
+
+
+def test_unknown_course_is_404(client):
+    assert client.get("/api/courses/yok").status_code == 404
+    assert client.delete("/api/courses/yok").status_code == 404
+    assert client.patch("/api/courses/yok", json={"name": "x"}).status_code == 404
+
+
+def test_course_detail_splits_materials_by_kind(client):
+    c = _course(client)
+    lec = _material(client, c["id"], "lecture", "slayt.pdf")
+    book = _material(client, c["id"], "book", "kitap.pdf")
+
+    d = client.get(f"/api/courses/{c['id']}").json()
+    assert [m["id"] for m in d["lectures"]] == [lec["id"]]
+    assert [m["id"] for m in d["books"]] == [book["id"]]
+    assert d["counts"] == {"lectures": 1, "books": 1, "documents": 0}
+    # Kitap indeks durumu seçim ekranında gösteriliyor; alan hep bulunmalı.
+    assert d["books"][0]["indexed"] is False
+    assert "indexed" not in d["lectures"][0]
+
+
+def test_unreadable_pdf_still_uploads(client):
+    """Sayfa sayısı bilgi amaçlı; okunamayan PDF yüklemeyi bozmamalı."""
+    c = _course(client)
+    m = _material(client, c["id"], "book")
+    assert m["pages"] == 0
+    assert m["available"] is True
+
+
+def test_non_pdf_material_rejected(client):
+    c = _course(client)
+    r = client.post(
+        f"/api/courses/{c['id']}/materials",
+        data={"kind": "lecture"},
+        files={"file": ("a.txt", b"x", "text/plain")},
+    )
+    assert r.status_code == 400
+
+
+def test_invalid_material_kind_rejected(client):
+    c = _course(client)
+    r = client.post(
+        f"/api/courses/{c['id']}/materials",
+        data={"kind": "notlar"},
+        files={"file": ("a.pdf", b"%PDF-", "application/pdf")},
+    )
+    assert r.status_code == 400
+
+
+def test_material_download_returns_the_original(client):
+    c = _course(client)
+    m = _material(client, c["id"], "book", "kitap.pdf")
+    r = client.get(f"/api/materials/{m['id']}/download")
+    assert r.status_code == 200
+    assert r.content == b"%PDF-govde"
+
+
+def test_course_rename(client):
+    c = _course(client)
+    r = client.patch(f"/api/courses/{c['id']}", json={"name": "Yeni ad"})
+    assert r.json()["name"] == "Yeni ad"
+    assert r.json()["code"] == "BLG 212"  # dokunulmayan alan korunur
+
+
+def test_job_from_library_materials(client):
+    """Ders sayfasının normal yolu: dosya değil, materyal kimliği gönderilir."""
+    c = _course(client)
+    lec = _material(client, c["id"], "lecture", "slayt.pdf")
+    book = _material(client, c["id"], "book", "kitap.pdf")
+
+    r = client.post("/api/jobs", data={
+        "course_id": c["id"], "lecture_id": lec["id"], "book_id": book["id"],
+        "backend": "demo",
+    })
+    assert r.status_code == 200, r.text
+    p = r.json()["params"]
+    assert p["course_id"] == c["id"]
+    assert p["lecture_id"] == lec["id"] and p["book_id"] == book["id"]
+    assert p["lecture_name"] == "slayt.pdf"
+
+
+def test_job_rejects_material_of_the_wrong_kind(client):
+    """Kitabı slayt diye göndermek sessizce saçma bir çıktı üretirdi."""
+    c = _course(client)
+    book = _material(client, c["id"], "book", "kitap.pdf")
+    r = client.post("/api/jobs", data={
+        "lecture_id": book["id"], "book_id": book["id"], "backend": "demo",
+    })
+    assert r.status_code == 400
+
+
+def test_job_with_unknown_material_is_404(client):
+    r = client.post("/api/jobs", data={
+        "lecture_id": "yok", "book_id": "yok", "backend": "demo",
+    })
+    assert r.status_code == 404
+
+
+def test_job_without_any_source_is_rejected(client):
+    r = client.post("/api/jobs", data={"backend": "demo"})
+    assert r.status_code == 400
+    assert "eksik" in r.json()["detail"].lower()
+
+
+def test_upload_through_job_lands_in_the_library(client):
+    """Derse yüklenen dosya kitaplığa girmezse kullanıcı her seferinde
+    aynı 100 MB'ı tekrar yükler."""
+    c = _course(client)
+    r = client.post("/api/jobs", files=_files(),
+                    data={"course_id": c["id"], "backend": "demo"})
+    assert r.status_code == 200
+
+    d = client.get(f"/api/courses/{c['id']}").json()
+    assert d["counts"]["lectures"] == 1 and d["counts"]["books"] == 1
+
+
+def test_document_retry_requires_failed_sections(client):
+    c = _course(client)
+    from dersnotu.api import server
+
+    doc = server.library.add_document(course_id=c["id"], title="X")
+    assert client.post(f"/api/documents/{doc.id}/retry").status_code == 400
+    assert client.post("/api/documents/yok/retry").status_code == 404
+
+
+def test_document_retry_refuses_when_source_is_gone(client, tmp_path):
+    """Kaynak silinmişse net bir hata; sessizce yanlış dosyayla koşmak değil."""
+    from dersnotu.api import server
+
+    c = _course(client)
+    ara = tmp_path / "x.doc.json"
+    ara.write_text("{}", encoding="utf-8")
+    doc = server.library.add_document(
+        course_id=c["id"], title="X", failed=[1], doc_path=ara
+    )
+    r = client.post(f"/api/documents/{doc.id}/retry")
+    assert r.status_code == 400
+    assert "silinmiş" in r.json()["detail"]
+
+
+def test_document_download_404_when_file_missing(client):
+    from dersnotu.api import server
+
+    c = _course(client)
+    doc = server.library.add_document(course_id=c["id"], title="X")
+    assert client.get(f"/api/documents/{doc.id}/download").status_code == 404
+    assert client.delete(f"/api/documents/{doc.id}").status_code == 200
+
+
+# --- sınav materyali -------------------------------------------------------
+def test_exam_material_is_separate_from_lectures_and_books(client):
+    c = _course(client)
+    _material(client, c["id"], "lecture", "slayt.pdf")
+    exam = _material(client, c["id"], "exam", "2023-vize.pdf")
+
+    d = client.get(f"/api/courses/{c['id']}").json()
+    assert [m["id"] for m in d["exams"]] == [exam["id"]]
+    assert d["counts"]["lectures"] == 1  # sınav slayt sayımına girmemeli
+
+
+def test_exam_reaches_the_job(client):
+    c = _course(client)
+    lec = _material(client, c["id"], "lecture", "slayt.pdf")
+    book = _material(client, c["id"], "book", "kitap.pdf")
+    exam = _material(client, c["id"], "exam", "vize.pdf")
+
+    r = client.post("/api/jobs", data={
+        "course_id": c["id"], "lecture_id": lec["id"], "book_id": book["id"],
+        "exam_id": exam["id"], "backend": "demo",
+    })
+    assert r.json()["params"]["exam_id"] == exam["id"]
+
+
+def test_exam_id_must_be_an_exam(client):
+    """Kitabı sınav diye göndermek 600 sayfayı öneke tıkardı."""
+    c = _course(client)
+    lec = _material(client, c["id"], "lecture", "slayt.pdf")
+    book = _material(client, c["id"], "book", "kitap.pdf")
+    r = client.post("/api/jobs", data={
+        "course_id": c["id"], "lecture_id": lec["id"], "book_id": book["id"],
+        "exam_id": book["id"], "backend": "demo",
+    })
+    assert r.status_code == 400
+
+
+# --- arama -----------------------------------------------------------------
+def test_course_search(client):
+    from dersnotu.api import server
+
+    c = _course(client)
+    doc = server.library.add_document(course_id=c["id"], title="Bits")
+    server.library.index_document(doc.id, c["id"], [
+        (0, "Sayı gösterimi", "İkinin tümleyeni negatif sayıları kodlar."),
+    ])
+
+    body = client.get(f"/api/courses/{c['id']}/search", params={"q": "tümleyeni"}).json()
+    assert len(body["hits"]) == 1
+    assert body["hits"][0]["document_id"] == doc.id
+    assert body["hits"][0]["section"] == 0
+
+    # Boş sorgu tüm dokümanları dökmemeli.
+    assert client.get(f"/api/courses/{c['id']}/search").json()["hits"] == []
+    assert client.get("/api/courses/yok/search?q=x").status_code == 404
+
+
+# --- okuyucu ---------------------------------------------------------------
+def test_reader_404_when_html_missing(client):
+    """Eski koşularda HTML yok; PDF hâlâ inilebilir olmalı, okuyucu net demeli."""
+    from dersnotu.api import server
+
+    c = _course(client)
+    doc = server.library.add_document(course_id=c["id"], title="X")
+    r = client.get(f"/ders/{c['id']}/not/{doc.id}")
+    assert r.status_code == 404
+    assert "okunabilir" in r.json()["detail"]
+
+
+def test_reader_serves_saved_html(client, tmp_path):
+    from dersnotu.api import server
+
+    c = _course(client)
+    page = tmp_path / "x.html"
+    page.write_text("<html><body>ders notu</body></html>", encoding="utf-8")
+    doc = server.library.add_document(course_id=c["id"], title="X", html_path=page)
+    r = client.get(f"/ders/{c['id']}/not/{doc.id}")
+    assert r.status_code == 200
+    assert "ders notu" in r.text
+
+
+# --- tahmin / kota ---------------------------------------------------------
+def test_estimate_rejects_unreadable_lecture(client):
+    """6 baytlık sahte PDF ayrıştırılamaz; net hata, sessiz sıfır değil."""
+    c = _course(client)
+    lec = _material(client, c["id"], "lecture", "slayt.pdf")
+    book = _material(client, c["id"], "book", "kitap.pdf")
+    r = client.get("/api/estimate",
+                   params={"lecture_id": lec["id"], "book_id": book["id"]})
+    assert r.status_code == 400
+    assert "okunamadı" in r.json()["detail"]
+
+
+def test_estimate_needs_real_materials(client):
+    assert client.get("/api/estimate",
+                      params={"lecture_id": "yok", "book_id": "yok"}).status_code == 404
+
+
+def test_quota_endpoint_is_honest_when_unknown(client):
+    """Kota yalnızca CLI akışında bildiriliyor; hiç çağrı yoksa null döner."""
+    body = client.get("/api/quota").json()
+    assert body["backend"] in ("api", "cli", "demo")
+    assert "rate_limit" in body
+
+
+@pytest.mark.skipif(not HAVE_PDFS, reason="örnek PDF'ler yok")
+@pytest.mark.slow
+def test_estimate_on_real_pdfs(client):
+    """Gerçek ders + indekslenmiş kitapla projeksiyon."""
+    c = _course(client)
+    with LECTURE.open("rb") as f:
+        lec = client.post(f"/api/courses/{c['id']}/materials", data={"kind": "lecture"},
+                          files={"file": (LECTURE.name, f, "application/pdf")}).json()
+    with BOOK.open("rb") as f:
+        book = client.post(f"/api/courses/{c['id']}/materials", data={"kind": "book"},
+                           files={"file": (BOOK.name, f, "application/pdf")}).json()
+
+    t = client.get("/api/estimate", params={
+        "lecture_id": lec["id"], "book_id": book["id"], "backend": "api",
+    }).json()
+    assert t["sections"] > 1
+    assert t["tokens"]["images"] > 0           # görsel slaytlar sayıldı
+    assert t["tokens"]["total_input"] > 10_000
+    assert 0 < t["cost"] < 20                  # makul aralık
+    assert t["seconds"] > 0
+    # Görüntü tokenları girdinin en büyük kalemi olmalı — projenin ana bulgusu.
+    assert t["tokens"]["images"] > t["tokens"]["retrieval"]
 
 
 @pytest.mark.skipif(not HAVE_PDFS, reason="örnek PDF'ler yok")

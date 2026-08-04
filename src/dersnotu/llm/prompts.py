@@ -147,8 +147,39 @@ def build_output_directives(language: str, depth: str, extras: list[str]) -> lis
     return lines
 
 
-def build_lecture_context(lecture, alignment_note: str = "") -> str:
-    """Tüm çağrılarda AYNI kalan ders bağlamı — cache'lenen kısım."""
+# Geçmiş sınav kâğıdı verildiğinde eklenen kural. Sınav metni önekte taşınır
+# (bölümler arasında değişmez), bu direktif de oraya girer.
+#
+# Buradaki disiplin projenin geri kalanıyla aynı: model "bu konu 2023'te
+# soruldu" diye SERBESTÇE iddia edemez, soruyu birebir alıntılamak zorunda.
+# Alıntılayamıyorsa iddia da yok. Atıf kuralının sınav kâğıdına uyarlanmışı.
+EXAM_RULE = """\
+GEÇMİŞ SINAV KÂĞIDI
+- Sana bu dersin geçmiş sınav sorularının metni verildi. Bunu KAPSAM \
+GENİŞLETMEK için kullanma — kapsamı hâlâ slaytlar belirler.
+- Kullanımı şudur: slayttaki bir konu geçmiş sınavda SORULMUŞSA, o konuyu \
+daha derin işle ve öğrenciyi soru tipine hazırla.
+- Böyle bir konuyu şu blokla işaretle:
+::: sınav
+**Sorulmuş:** soruyu birebir alıntıla.
+
+Çözüm yolu / nelere dikkat edilmeli.
+:::
+- Soruyu birebir alıntılayamıyorsan bu bloğu HİÇ yazma. "Bu konu sınavda \
+çıkar" gibi dayanaksız bir iddia, kaynaksız bir cümle yazmakla aynı şeydir.
+- Sınav kâğıdında olup slaytta olmayan konuyu ana başlık yapma; en fazla \
+bölümün sonunda tek satırla "sınavda geçmiş ama slaytta yok" diye not düş.
+"""
+
+
+def build_lecture_context(
+    lecture, alignment_note: str = "", exam_text: str = ""
+) -> str:
+    """Tüm çağrılarda AYNI kalan ders bağlamı — cache'lenen kısım.
+
+    Sınav metni de buraya giriyor: bölümden bölüme değişmediği için önekte
+    durması doğru yer, bir kez yazılıp her bölümde ucuza okunur.
+    """
     lines = [
         f"# DERS: {lecture.title}",
         f"Toplam {len(lecture.slides)} slayt, {len(lecture.sections)} bölüm.",
@@ -164,6 +195,8 @@ def build_lecture_context(lecture, alignment_note: str = "") -> str:
         lines.append("")
     if alignment_note:
         lines += ["## Kitap eşlemesi", alignment_note, ""]
+    if exam_text:
+        lines += ["## GEÇMİŞ SINAV SORULARI", exam_text, "", EXAM_RULE, ""]
     return "\n".join(lines)
 
 

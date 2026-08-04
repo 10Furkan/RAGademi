@@ -22,20 +22,24 @@ def document_to_html(
     *,
     lecture_pdf: str | Path | None = None,
     book_pdf: str | Path | None = None,
+    nav_html: str = "",
 ) -> str:
     """StudyDocument → tam HTML sayfası."""
     parts: list[str] = []
     for sec in doc.sections:
+        # Her bölüm bir çıpa alır: arama sonucu doğrudan bölüme atlayabilsin.
+        anchor = f'<a id="bolum-{sec.section_index}"></a>'
         if sec.error:
             a, b = sec.slide_range
             parts.append(
-                f'<section class="failed"><strong>{sec.title or "Bölüm"}</strong> '
+                f'{anchor}<section class="failed"><strong>{sec.title or "Bölüm"}</strong> '
                 f"üretilemedi ({sec.error}). İlgili slaytlar: {a}–{b}. "
                 "Bu bölümü tek başına yeniden çalıştırabilirsin.</section>"
             )
             continue
         parts.append(
-            markdown_to_html(
+            anchor
+            + markdown_to_html(
                 sec.markdown,
                 lecture_pdf=lecture_pdf,
                 book_pdf=book_pdf,
@@ -55,6 +59,7 @@ def document_to_html(
         body_html="\n".join(parts),
         meta=meta,
         toc_html=build_toc(doc.sections),
+        nav_html=nav_html,
     )
 
 
@@ -117,10 +122,21 @@ def render_document(
     *,
     lecture_pdf: str | Path | None = None,
     book_pdf: str | Path | None = None,
+    nav_html: str = "",
+    save_html: str | Path | None = None,
 ) -> Path:
+    """PDF basar; `save_html` verilirse aynı HTML'i diske de yazar.
+
+    Okuyucu bu dosyayı sunuyor. İkinci kez render etmek şekilleri kitaptan
+    yeniden kırpmak demek olurdu (saniyeler); tek render, iki tüketici.
+    """
     if not assets_available():
         raise RenderError(
             "KaTeX varlıkları yok. Çalıştır: python scripts/vendor_katex.py"
         )
-    html = document_to_html(doc, lecture_pdf=lecture_pdf, book_pdf=book_pdf)
+    html = document_to_html(
+        doc, lecture_pdf=lecture_pdf, book_pdf=book_pdf, nav_html=nav_html
+    )
+    if save_html:
+        Path(save_html).write_text(html, encoding="utf-8")
     return html_to_pdf(html, out_path)

@@ -12,7 +12,9 @@ Fontlar bilinçli olarak sistem fontlarına dayanıyor: render sırasında ağa
 
 from __future__ import annotations
 
+import base64
 import re
+from functools import lru_cache
 from pathlib import Path
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets" / "katex"
@@ -266,6 +268,45 @@ blockquote p:last-child { margin-bottom: 0; }
 .callout-glossary table { margin-bottom: 0; }
 .callout-glossary th { border-bottom-color: var(--ink-muted); }
 
+/* Geçmiş sınav: kâğıttan kesilmiş bir parça. Üst ve alt cetvel dışında
+   kutulama yok — "kendini sına" zaten kutuyu ve fosforlu etiketi almış
+   durumda, ikisi de kutu olsaydı öğrenci hangisinde İŞ yapacağını
+   ayırt edemezdi. Bu blok bilgi verir, iş istemez. */
+.callout-exam {
+  border-top: 1.5px solid var(--ink);
+  border-bottom: 1.5px solid var(--ink);
+  padding: 2.8mm 0 2.5mm;
+}
+.callout-exam .callout-label {
+  display: inline-block;
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  padding: 0.6mm 1.8mm;
+  margin-bottom: 2.4mm;
+}
+.callout-exam strong { font-variant: all-small-caps; letter-spacing: 0.04em; }
+
+/* --- Okuyucu çubuğu ---------------------------------------------------
+   Kaydedilen HTML iki mecrada kullanılıyor: tarayıcıda okuyucu, Chromium'da
+   PDF. Çubuk belgenin İÇİNDE durur ve baskıda gizlenir — HTML'i sonradan
+   string ile kesip yapıştırmaktan çok daha az kırılgan. */
+.docnav {
+  max-width: 190mm;
+  margin: 0 auto 6mm;
+  padding: 4mm 0 3mm;
+  display: flex;
+  gap: 4mm;
+  align-items: baseline;
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 8pt;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.docnav a { color: var(--ink-muted); text-decoration: none; }
+.docnav a:hover { color: var(--ink); }
+.docnav .sep { color: var(--rule); }
+@media print { .docnav { display: none; } }
+
 /* --- Slayt şekilleri -------------------------------------------------- */
 .slide-figure {
   margin: 4mm 0;
@@ -388,6 +429,7 @@ _TEMPLATE = """<!doctype html>
 <style>{css}</style>
 </head>
 <body>
+{nav}
 <div class="page">
   <header class="cover">
     <div class="eyebrow">Ders notu · kitapla genişletilmiş</div>
@@ -419,14 +461,45 @@ _TEMPLATE = """<!doctype html>
 """
 
 
+@lru_cache(maxsize=1)
 def _katex_css() -> str:
-    """KaTeX CSS'ini font yolları mutlak file:// olacak şekilde okur."""
+    """KaTeX CSS'ini fontlar GÖMÜLÜ olacak şekilde okur.
+
+    Font yolları eskiden mutlak `file://` yapılıyordu. Bu, Chromium HTML'i
+    diskten açtığı sürece (PDF basımı) çalışıyor; ama aynı HTML uygulama içi
+    okuyucuda **http://** üzerinden sunuluyor ve o zaman tarayıcı her fontu
+    "Not allowed to load local resource" diyerek reddediyor — matematik yedek
+    fontla, yanlış görünüyor.
+
+    Çözüm data: URI: tek bir HTML iki mecrada da doğru çalışır. Yalnızca
+    woff2 gömülür (~296 KB → ~395 KB base64); woff/ttf yedekleri
+    ayıklanır, çünkü hedef tarayıcı zaten Chromium ve üç kopya gömmek
+    dosyayı gereksiz üçe katlar.
+    """
     css_path = ASSETS / "katex.min.css"
     if not css_path.exists():
         return ""
     css = css_path.read_text(encoding="utf-8")
-    fonts = (ASSETS / "fonts").as_uri()
-    return re.sub(r"url\(fonts/", f"url({fonts}/", css)
+
+    def gom(m: re.Match) -> str:
+        f = ASSETS / "fonts" / m.group(1)
+        if not f.exists():
+            return m.group(0)
+        veri = base64.b64encode(f.read_bytes()).decode("ascii")
+        return f'url(data:font/woff2;base64,{veri}) format("woff2")'
+
+    # KaTeX'in dağıttığı CSS `format("woff2")` yazıyor — tırnak türü sürüme
+    # göre değişebildiği için ikisi de kabul ediliyor. Eşleşmezse fontlar
+    # sessizce gömülmez ve hata ancak tarayıcıda görülür.
+    q = r"[\"']"
+    css = re.sub(rf",\s*url\(fonts/[^)]+\)\s*format\({q}(?:woff|truetype){q}\)", "", css)
+    css, n = re.subn(rf"url\(fonts/([^)]+\.woff2)\)\s*format\({q}woff2{q}\)", gom, css)
+    if not n:  # pragma: no cover — sürüm değişirse burada yakalanır
+        raise RuntimeError(
+            "KaTeX CSS'inde gömülecek woff2 bulunamadı; font sözdizimi değişmiş "
+            "olabilir. Gömülmezse okuyucuda matematik yedek fontla çıkar."
+        )
+    return css
 
 
 def _read(name: str) -> str:
@@ -452,7 +525,16 @@ def build_toc(sections) -> str:
     return '<nav class="toc"><h2>İçindekiler</h2><ol>' + "".join(items) + "</ol></nav>"
 
 
-def build_page(*, title: str, body_html: str, meta: str, toc_html: str, lang: str = "tr") -> str:
+def build_nav(course_href: str, course_name: str, pdf_href: str = "") -> str:
+    """Okuyucu çubuğu. Baskıda gizli; PDF yolu boş string geçer."""
+    parts = [f'<a href="{course_href}">← {course_name}</a>']
+    if pdf_href:
+        parts += ['<span class="sep">·</span>', f'<a href="{pdf_href}">PDF indir</a>']
+    return f'<nav class="docnav">{"".join(parts)}</nav>'
+
+
+def build_page(*, title: str, body_html: str, meta: str, toc_html: str,
+               lang: str = "tr", nav_html: str = "") -> str:
     from .markdown import pygments_css
 
     return _TEMPLATE.format(
@@ -461,6 +543,7 @@ def build_page(*, title: str, body_html: str, meta: str, toc_html: str, lang: st
         meta=meta,
         toc=toc_html,
         body=body_html,
+        nav=nav_html,
         css=CSS,
         pygments_css=pygments_css(),
         katex_css=_katex_css(),

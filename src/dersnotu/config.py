@@ -48,6 +48,20 @@ class Settings(BaseSettings):
     # kenarı yarıya indirmek görüntü maliyetini dörtte bire düşürür.
     slide_image_max_edge: int = 1400
 
+    # --- Kitaplık -------------------------------------------------------
+    # Dersler, yüklenmiş materyaller ve üretilmiş dokümanlar. `.cache` altında
+    # duruyor ama silinebilir bir önbellek DEĞİL: burayı silmek kullanıcının
+    # ders listesini silmek demek.
+    library_name: str = "library.sqlite"
+
+    @property
+    def library_path(self) -> Path:
+        return self.cache_dir / self.library_name
+
+    @property
+    def materials_dir(self) -> Path:
+        return self.cache_dir / "materials"
+
     def ensure_dirs(self) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.out_dir.mkdir(parents=True, exist_ok=True)

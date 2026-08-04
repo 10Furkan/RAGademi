@@ -11,6 +11,7 @@ havuzunda koşar; olaylar `call_soon_threadsafe` ile asyncio tarafına aktarıl�
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -49,11 +50,20 @@ class Job:
     error: str | None = None
     pdf_path: Path | None = None
     md_path: Path | None = None
+    # Uygulama içi okuyucunun sunduğu dosya (PDF ile aynı render'dan).
+    html_path: Path | None = None
     # Yeniden deneme bu dosyadan besleniyor (konu kartları + hizalama içerir).
     doc_path: Path | None = None
     failed_sections: list[int] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    # Kuyrukta bekleme süresi işin süresi değil; sayaç RUNNING'de başlar.
+    # Bu ölçüm süre tahminini kalibre ediyor (bkz. estimate.py).
+    started_at: float | None = None
+
+    @property
+    def elapsed(self) -> float:
+        return 0.0 if self.started_at is None else time.monotonic() - self.started_at
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -120,6 +130,7 @@ class JobStore:
 
         def runner() -> None:
             job.status = JobStatus.RUNNING
+            job.started_at = time.monotonic()
             self.publish(job.id, Event("job:running"))
             try:
                 fn(job, lambda ev: self.publish(job.id, ev))

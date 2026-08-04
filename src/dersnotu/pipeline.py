@@ -124,6 +124,9 @@ class Inputs:
     extras: list[str] = field(default_factory=list)
     # auto | api | cli (Claude Pro/Max aboneliği) | demo
     backend: str = "auto"
+    # Geçmiş sınav kâğıdı (isteğe bağlı). Kapsamı DEĞİŞTİRMEZ; slaytta zaten
+    # olan bir konunun ne kadar derin işleneceğini kaydırır.
+    exam_path: Path | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -377,9 +380,35 @@ def expand_section(
     )
 
 
-def build_cached_prefix(lecture: Lecture, alignment_note: str = "") -> list[dict]:
+# Sınav kâğıdı önekte taşınıyor (bölümden bölüme değişmez), ama sınırsız
+# değil: 20K karakter ≈ 5K token, bir kez yazılıp her bölümde ucuza okunur.
+# Sınırsız bırakılsaydı 40 sayfalık bir soru arşivi öneki üçe katlardı.
+EXAM_CHAR_LIMIT = 20_000
+
+
+def load_exam_text(path: Path | None) -> str:
+    """Sınav kâğıdının metnini okur. Okunamıyorsa sessizce boş döner —
+    sınav kâğıdı isteğe bağlı bir zenginleştirme, koşuyu düşürmemeli."""
+    if not path:
+        return ""
+    try:
+        pages = read_pages(Path(path))
+    except Exception:
+        return ""
+    metin = "\n\n".join(p.strip() for p in pages if p and p.strip())
+    return metin[:EXAM_CHAR_LIMIT]
+
+
+def build_cached_prefix(
+    lecture: Lecture, alignment_note: str = "", exam_text: str = ""
+) -> list[dict]:
     """Tüm bölüm çağrılarında bit-bit aynı kalan önek."""
-    return [cached({"type": "text", "text": build_lecture_context(lecture, alignment_note)})]
+    return [
+        cached({
+            "type": "text",
+            "text": build_lecture_context(lecture, alignment_note, exam_text),
+        })
+    ]
 
 
 def _expand_all(
@@ -468,7 +497,10 @@ def run(
     cards = build_topic_cards(llm, lecture, progress, language=inputs.language)
     aligns = align_to_book(llm, lecture, book, cards, progress)
 
-    prefix = build_cached_prefix(lecture, _alignment_note(aligns))
+    exam_text = load_exam_text(inputs.exam_path)
+    if exam_text:
+        progress("exam:loaded", f"{len(exam_text):,} karakter sınav metni")
+    prefix = build_cached_prefix(lecture, _alignment_note(aligns), exam_text)
 
     sections = lecture.sections[:limit_sections] if limit_sections else lecture.sections
     expanded = _expand_all(
@@ -562,7 +594,11 @@ def retry_failed(
             "Aynı ders dosyasını verdiğinden emin ol."
         )
 
-    prefix = build_cached_prefix(lecture, _alignment_note(aligns))
+    # Önek ilk koşudakiyle aynı kurulmalı: sınav kâğıdı atlanırsa yeniden
+    # üretilen bölüm kardeşlerinden farklı bir çerçeveden çıkar.
+    prefix = build_cached_prefix(
+        lecture, _alignment_note(aligns), load_exam_text(inputs.exam_path)
+    )
     yeniden = _expand_all(
         llm,
         lecture=lecture,

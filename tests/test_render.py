@@ -185,6 +185,21 @@ def test_callout_content_keeps_math_and_tables():
     assert "math-inline" in html
 
 
+def test_katex_fonts_are_embedded_not_linked():
+    """Aynı HTML iki mecrada kullanılıyor: Chromium diskten açıp PDF basıyor,
+    okuyucu ise http:// üzerinden sunuyor. `file://` font referansı ikincisinde
+    "Not allowed to load local resource" ile reddedilir ve matematik yedek
+    fontla çıkar. Data URI ikisinde de çalışan tek biçim."""
+    from dersnotu.render.html import _katex_css
+
+    css = _katex_css()
+    assert "file://" not in css
+    assert "url(fonts/" not in css
+    assert css.count("url(data:font/woff2") == 20
+    # woff/ttf yedekleri ayıklanmalı, yoksa dosya gereksiz üçe katlanır.
+    assert 'format("woff")' not in css and 'format("truetype")' not in css
+
+
 def test_unknown_container_name_is_left_alone():
     """Tanımsız blok adı sessizce yutulmamalı — metin kaybolmasın."""
     html = markdown_to_html("::: bilinmeyen\nönemli metin\n:::")

@@ -267,6 +267,21 @@ uppercasing the English word "Figure" yields "FİGURE" (dotted capital I) and
 mangles the book's own label. Anything quoted from an English source needs
 `lang="en"`, or no transform at all.
 
+**KaTeX fonts must be embedded, not linked.** `_katex_css()` inlines the 20
+woff2 faces as `data:` URIs. Absolute `file://` paths work when Chromium opens
+the HTML from disk (PDF printing) but the **same HTML is served over http://**
+by the in-app reader, where every font is rejected with "Not allowed to load
+local resource" and math silently falls back to a serif face. Only woff2 is
+embedded; keeping the woff/ttf fallbacks would triple the file for a browser
+that is always Chromium. `_katex_css` raises if the substitution matches
+nothing — a KaTeX upgrade that changes the `src:` quoting style would otherwise
+break the reader invisibly.
+
+**One rendered HTML, two media.** `render_document(save_html=...)` writes the
+same document the PDF is printed from; the reader serves that file. The
+back-link bar lives *inside* the document and is hidden with `@media print`,
+which is far less fragile than string-splicing a nav into saved HTML.
+
 **Internal markers must never reach the reader.** `[ŞEKİL: slayt N]` is replaced
 by the slide image when a lecture PDF is available; without one,
 `strip_figure_markers` turns it into a styled note. Leaving the raw bracket form
@@ -283,7 +298,37 @@ order decides.
 
 **Verify UI changes by screenshotting both color schemes** (`page.emulate_media(
 color_scheme=...)`). Also note Playwright's `check()` fails on visually-hidden
-inputs — click the wrapping `<label>`, which is the real user path anyway.
+inputs — click the wrapping `<label>`, which is the real user path anyway. The
+same applies to `wait_for_selector`: material radios live under `.pick input`
+(`opacity:0;width:0`), so waiting for them **visible** hangs — pass
+`state="attached"`.
+
+**`hidden` loses to any class that sets `display`.** `[hidden]` is specificity
+0-1-0; `.dl{display:block}` and `.out.empty{display:flex}` are 0-1-0 and 0-2-0
+and come later, so the "PDF indir" button and the empty output panel rendered
+before a run ever started. `app.css` therefore opens with
+`[hidden]{display:none!important}` — hiding is absolute, not a suggestion.
+
+**Do not scope shared row classes to one container.** `.row .act` styled only
+the document rows; the material rows use `.pick > .pb`, so their `<button>`
+fell through to the base `button` rule and rendered as a full-size black block
+next to a filename. `.nm/.mt/.grow/.acts/.act` are defined unscoped for exactly
+this reason.
+
+**Playwright drives resolve the backend the same way the browser does** — on a
+machine with the `claude` CLI installed that means `cli`, and a UI smoke test
+silently spends real Claude Pro quota at ~3 min/call. Click the Demo label
+before pressing Üret. Backends without credentials render *disabled*, so a
+drive must check `is_enabled()` before clicking one.
+
+**Derive per-element handler lists from the DOM, not from a literal array.**
+The upload handler loop was written as `["d-lecture", "d-book"]`; adding the
+exam dropzone left it without a change listener and uploads silently never
+started. `$$(".drop")` cannot fall out of sync.
+
+**Demo output is English.** `FakeLLMClient` composes from real CSAPP chunks, so
+searching a Turkish term against a demo document correctly returns nothing —
+that is not a search bug.
 
 ### Web layer
 
@@ -302,6 +347,89 @@ hits "cannot schedule new futures after shutdown".
 
 `section:delta` events are streamed but **not** appended to job history; at
 hundreds per second they would balloon memory.
+
+### Ders kitaplığı (`library.py`)
+
+Two stores, deliberately separate: `JobStore` holds a run's live state in
+memory (dies with the process), `LibraryStore` holds courses, uploaded
+materials and generated documents in SQLite (survives restart). `_record()`
+writes a finished job into the library; that is the only bridge.
+
+Pages: `/` lists courses, `/ders/{id}` is one course. Both are static files —
+the course id comes from the URL in JS, the server renders no templates.
+
+**Materials are content-addressed** (`.cache/materials/<sha16>.pdf`). The same
+textbook in two courses is one file on disk and — since the FTS index is keyed
+by the same SHA — one index build. **The cost is paid in deletion**: a blob
+belongs to a SHA, not to a course, so `_collect_garbage` recounts before
+unlinking. Skipping that count would silently gut another course that shares
+the book. `test_deleting_one_course_keeps_the_shared_blob` locks it.
+
+**Deleting a material does not delete its documents** — output is worth more
+than its sources. The FK is `ON DELETE SET NULL`; retry then refuses with a
+clear message instead of running against the wrong file. Note `PRAGMA
+foreign_keys = ON` is per-connection, so it lives in `_conn()`; without it both
+the cascade and the SET NULL silently do nothing.
+
+**Output files are named after the document, not the job.** Retry opens a new
+job but produces the *same* document; keying on the job id would add a fresh
+row and a fresh PDF to the course page on every attempt. `job.params["out_stem"]`
+carries the document id and `add_document` is `INSERT OR REPLACE`.
+
+**`/api/documents/{id}/retry` is the one that matters.** `/api/jobs/{id}/retry`
+only works while the server has been up since the run. The real scenario —
+generation died, browser closed, machine slept — is served from the library:
+sources are materials, topic cards are in `.doc.json`.
+
+**Schema changes need a migration, not a bump.** `CREATE TABLE IF NOT EXISTS`
+adds no columns to an existing table, so a shipped library keeps the old shape
+and the first query dies with `no such column`. `SCHEMA_VERSION` +`_migrate()`
+(tracked in `PRAGMA user_version`) is the path. SQLite cannot ALTER away a
+CHECK constraint either — adding the `exam` material kind required rebuilding
+the table, which is why `materials.kind` now has no CHECK at all and validation
+lives in `add_material`.
+
+**`doc_fts` is a virtual table: cascade does not reach it.** Deleting a course
+removes its documents through the FK, but their search rows survive and a
+deleted course keeps answering queries. Both `delete_course` and
+`delete_document` delete from `doc_fts` explicitly.
+
+**Search uses AND; retrieval uses OR.** `index/store.py::_to_fts_query` joins
+terms with OR because retrieval wants recall. The search box in `library.py`
+has its own builder that joins with AND — someone typing two words wants the
+section containing both. Both must strip punctuation: it is operator syntax in
+FTS5 and `two's complement` raises without it.
+
+### Estimate (`estimate.py`)
+
+One function feeds two consumers — `dersnotu estimate` and the pre-flight strip
+on the course page. It used to live inside the CLI command; two copies would
+have drifted and shown the user different numbers in the terminal and the
+browser.
+
+**Duration calibrates itself from history.** A fixed seconds-per-section
+constant is a lie: the API takes seconds, the Claude Pro CLI took a measured
+189s, and both move with machine and network. `documents.duration`/`.sections`
+record real runs and `seconds_per_section` takes the **median** — one run
+stalled behind a quota wait would wreck a mean but not a median. Constants in
+`FALLBACK_SECONDS` are only for the first run.
+
+**Cost is zero on `cli` and `demo`, and that is not a rounding artifact.** A
+subscription spends quota, not dollars; printing `$0.76` next to Claude Pro
+would be false.
+
+### Past exams (`prompts.py::EXAM_RULE`)
+
+The third material kind. **It does not change scope** — slides still decide what
+you are responsible for; the exam only shifts how deeply an already-in-scope
+topic is treated. The model may not claim "this was asked" without quoting the
+question verbatim, which is the citation discipline applied to a third source:
+if it cannot quote, there is no claim. `tests/test_exam.py` locks both halves.
+
+Exam text rides in the **cached prefix** (it does not vary across sections) and
+is capped at `EXAM_CHAR_LIMIT` — an uncapped question archive would triple the
+prefix. `retry_failed` must rebuild the prefix *with* the exam, or a retried
+section comes out framed differently from its siblings.
 
 **`FakeLLMClient` (`llm/fake.py`) runs the whole pipeline with no API key** —
 demo checkbox in the UI, `demo=true` on the API. It composes its output from
