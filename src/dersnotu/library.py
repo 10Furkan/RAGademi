@@ -117,6 +117,20 @@ CREATE VIRTUAL TABLE IF NOT EXISTS doc_fts USING fts5(
 """
 
 
+# `documents` tablosunun şema ötesi sütunları: sürüm sürüm eklendiler ve
+# hepsi `ALTER TABLE ADD COLUMN` ile geriye dönük eklenebilir. Liste burada,
+# tek yerde: `_SCHEMA` taze veritabanını kurar, bu liste eskisini yetiştirir.
+_DOC_COLUMNS = (
+    ("exam_id", "TEXT"),                            # v2
+    ("html_path", "TEXT"),                          # v2
+    ("duration", "REAL NOT NULL DEFAULT 0"),        # v2
+    ("sections", "INTEGER NOT NULL DEFAULT 0"),     # v2
+    # v3 — deneme sınavları da bu tabloda. Varsayılan 'note' olduğu için göç
+    # öncesi yazılmış her satır doğru türü kendiliğinden alır.
+    ("kind", "TEXT NOT NULL DEFAULT 'note'"),
+)
+
+
 def _migrate(c: sqlite3.Connection) -> None:
     """Var olan bir kitaplığı güncel şemaya taşır.
 
@@ -124,29 +138,36 @@ def _migrate(c: sqlite3.Connection) -> None:
     yukarıdaki şemayı alır, eskisi olduğu yerde kalır ve ilk sorguda
     `no such column` ile patlar. Kitaplık kullanıcının ders listesi — silip
     yeniden kurmak bir seçenek değil, göç yazılır.
+
+    **Damga tek başına yeterli bir kapı DEĞİL.** Eskiden bu fonksiyon
+    `user_version >= SCHEMA_VERSION` ise hemen dönüyordu. `SCHEMA_VERSION`
+    arttırılıp ona karşılık gelen adım henüz yazılmamışken kitaplık bir kez
+    açılırsa — geliştirme sırasında bir dakikalık bir aralık — damga yazılır,
+    sütun eklenmez ve o erken dönüş bozuk hâli KALICI kilitler: sonraki her
+    açılış "zaten güncel" deyip geçer, her sorgu `no such column` ile patlar.
+    Kurtuluş yolu da yoktur.
+
+    Bu yüzden her adım damgaya bakılmadan, her açılışta doğrulanıyor. Hepsi
+    idempotent ve "yapılacak bir şey var mı" sorusunu şemanın KENDİSİNE
+    soruyor, damgaya değil. Bedeli üç okuma; karşılığı, damganın
+    yalanlayamayacağı bir şema.
+
+    Damga yine de yazılıyor — ama artık bir kapı değil, bir kayıt: hangi
+    sürümün beklendiğini söyler ve göçün ne zaman koştuğunu okunur kılar.
+    Yeni bir adım eklerken `SCHEMA_VERSION`'ı arttır, ama adımı da bu
+    fonksiyonun ŞEMAYA BAKAN diline yaz — "sürüm küçükse" diline değil.
     """
-    surum = c.execute("PRAGMA user_version").fetchone()[0]
-    if surum >= SCHEMA_VERSION:
-        return
+    # Ucuz ve idempotent: sütun varsa dokunulmaz.
+    for ad, tanim in _DOC_COLUMNS:
+        _add_column(c, "documents", ad, tanim)
 
-    if surum < 2:
-        for ad, tanim in (
-            ("exam_id", "TEXT"),
-            ("html_path", "TEXT"),
-            ("duration", "REAL NOT NULL DEFAULT 0"),
-            ("sections", "INTEGER NOT NULL DEFAULT 0"),
-        ):
-            _add_column(c, "documents", ad, tanim)
-        # v1'de `kind` üzerinde CHECK vardı; 'exam' onu ihlal ederdi ve
-        # SQLite CHECK'i ALTER ile kaldırmaya izin vermiyor.
-        _drop_kind_check(c)
+    # v1'de `kind` üzerinde CHECK vardı; 'exam' onu ihlal ederdi ve SQLite
+    # CHECK'i ALTER ile kaldırmaya izin vermiyor. Kendi koşulunu sqlite_master'
+    # dan okuyor, damgadan değil.
+    _drop_kind_check(c)
 
-    if surum < 3:
-        # Deneme sınavları da `documents` tablosunda duruyor. Varsayılan
-        # 'note' olduğu için var olan satırlar doğru türü kendiliğinden alır.
-        _add_column(c, "documents", "kind", "TEXT NOT NULL DEFAULT 'note'")
-
-    c.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    if c.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+        c.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
 def _add_column(c: sqlite3.Connection, table: str, name: str, decl: str) -> None:

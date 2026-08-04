@@ -402,6 +402,17 @@ in exactly two places: what `sections` counts, and the duration calibration
 filter above. The course page shows them in one list with a badge on the
 practice rows — the exception is what gets marked, not the norm.
 
+**`user_version` is a record, not a gate — never let a migration step trust
+it.** `_migrate` used to return early on `user_version >= SCHEMA_VERSION`. Bump
+the constant, open the library once before writing the matching step — a
+one-minute window during development — and the stamp is written while the
+column is not. That early return then locks the broken state in **permanently**:
+every later open says "already current", every query dies with `no such column`,
+and there is no path out. Each step now asks the *schema* whether there is work
+to do (`PRAGMA table_info`, `sqlite_master`), which costs three reads and cannot
+be lied to. `test_a_lying_version_stamp_does_not_lock_in_a_broken_schema` locks
+it. Write new steps in that language too, not in "if version <".
+
 **Schema changes need a migration, not a bump.** `CREATE TABLE IF NOT EXISTS`
 adds no columns to an existing table, so a shipped library keeps the old shape
 and the first query dies with `no such column`. `SCHEMA_VERSION` +`_migrate()`
@@ -500,6 +511,21 @@ shows up in demo output too. Use it for any orchestration work. It answers the
 practice schema the same way, and it obeys the same rule the real prompt does:
 if the paper has no quotable question, `modeled_on` comes back **empty** rather
 than invented — otherwise the demo would teach the wrong contract.
+
+### CLI output must not be able to kill the command
+
+**The Turkish Windows console is cp1254, and `→` is not in it.** Neither are
+rich's box-drawing characters (`─ │ ┌`). With the default `errors="strict"` that
+is a `UnicodeEncodeError` — and it does not garble a line, it kills the process:
+`serve` died printing its startup banner, so **the server never started at all**,
+and `inspect` died drawing its table. `cli.py::_konsolu_dayanikli_yap` relaxes
+the error mode to `replace` at import.
+
+It deliberately does **not** force the stream to UTF-8. Turkish letters (ş ğ ı İ)
+*are* in cp1254; re-encoding would turn every readable word into mojibake to save
+one arrow. The stream keeps its encoding, an unprintable character becomes `?`,
+and the command lives. `tests/test_cli.py` reproduces the crash first, so the
+test still measures something if the guard is removed.
 
 ## Conventions
 

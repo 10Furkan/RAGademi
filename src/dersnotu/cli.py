@@ -6,6 +6,7 @@ boru hattının LLM dışı tamamını doğrulamayı sağlar.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import typer
@@ -18,6 +19,30 @@ from .index import BookIndex, chunk_book, estimate_tokens
 from .llm.client import LLMClient
 from .pdfio import parse_book, parse_lecture, read_pages, sha256_file
 from .pipeline import Inputs, run, save_debug, to_markdown
+
+
+def _konsolu_dayanikli_yap() -> None:
+    """Yazdırılamayan bir karakter komutu ÖLDÜRMESİN.
+
+    Türkçe Windows'ta konsol kod sayfası cp1254 olabiliyor. Türkçe harfler
+    (ş ğ ı İ) orada var — sorun onlar değil; `→` oku ve rich'in tablo çizgileri
+    (─ │ ┌) YOK. Varsayılan `errors="strict"` ile bu, `UnicodeEncodeError`
+    demek ve komut hiç iş yapmadan çöküyor: `serve` başlangıç satırını
+    basamadığı için sunucu HİÇ ayağa kalkmıyordu, `inspect` tabloyu çizerken
+    ölüyordu.
+
+    Akışın kendi kodlamasına dokunmuyoruz — cp1254'ü utf-8'e çevirmek Türkçe
+    metni okunmaz hâle getirirdi, oku kaybetmekten çok daha kötü. Yalnızca
+    hata kipi gevşetiliyor: yazdırılamayan karakter `?` olur, komut yaşar.
+    """
+    for akis in (sys.stdout, sys.stderr):
+        try:
+            akis.reconfigure(errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass  # yeniden yönlendirilmiş ya da desteklemeyen akış
+
+
+_konsolu_dayanikli_yap()
 
 app = typer.Typer(add_completion=False, help="Ders slaytlarını anlaşılır ders notuna çevirir.")
 console = Console()

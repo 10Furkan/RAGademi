@@ -12,7 +12,7 @@ import hashlib
 
 import pytest
 
-from dersnotu.library import KINDS, LibraryStore, NotFound
+from dersnotu.library import KINDS, SCHEMA_VERSION, LibraryStore, NotFound
 
 
 @pytest.fixture
@@ -258,6 +258,35 @@ def test_v1_library_migrates_without_losing_data(tmp_path):
     # v3: göç öncesi yazılmış her satır ders notudur.
     assert lib.document("d1").kind == "note"
     assert lib.course("c1").to_dict()["counts"]["notes"] == 1
+
+
+def test_a_lying_version_stamp_does_not_lock_in_a_broken_schema(tmp_path):
+    """Damga "güncelim" diyor ama sütun yok — göç yine de düzeltmeli.
+
+    Bu senaryo kurgusal değil, yaşandı: `SCHEMA_VERSION` arttırılıp ona
+    karşılık gelen adım henüz yazılmamışken kitaplık bir kez açıldı. Damga
+    yazıldı, sütun eklenmedi. `user_version >= SCHEMA_VERSION` ise erken dönen
+    bir göç bu hâli KALICI kilitler: sonraki her açılış "zaten güncel" der ve
+    her sorgu `no such column` ile patlar — kurtuluş yolu olmadan.
+
+    Bu yüzden göç adımları koşulunu ŞEMADAN okur, damgadan değil.
+    """
+    import sqlite3
+
+    db = tmp_path / "library.sqlite"
+    LibraryStore(db, tmp_path / "materials").create_course("Ders", "BLG")
+
+    # Sütunu düşür ve damgayı yerinde bırak: yalan söyleyen bir kitaplık.
+    conn = sqlite3.connect(db)
+    conn.execute("ALTER TABLE documents DROP COLUMN kind")
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    conn.commit()
+    conn.close()
+
+    lib = LibraryStore(db, tmp_path / "materials")
+    assert [x.name for x in lib.courses()] == ["Ders"]  # sorgu patlamamalı
+    d = lib.add_document(course_id=lib.courses()[0].id, title="X", kind="practice")
+    assert lib.document(d.id).kind == "practice"
 
 
 def test_migration_is_idempotent(tmp_path):
