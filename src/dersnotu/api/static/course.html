@@ -152,8 +152,6 @@ header{padding:34px 0 22px}
         <p class="modehint" id="modehint"></p>
 
         <div class="opts" style="margin-top:18px">
-          <label>İlk <input class="num" type="number" name="sections" value="0" min="0" max="40">
-                 bölüm (0 = hepsi)</label>
           <span id="cred"></span>
           <button id="go" style="margin-left:auto" disabled>Ders notu oluştur</button>
         </div>
@@ -380,7 +378,7 @@ function tahminIste(){
   tahminZaman = setTimeout(async () => {
     const p = new URLSearchParams({
       lecture_id: l.value, book_id: b.value, exam_id: deger("exam_id"),
-      backend: deger("backend") || "auto", sections: $('[name="sections"]').value || "0",
+      backend: deger("backend") || "auto",
     });
     try {
       const r = await fetch(`/api/estimate?${p}`);
@@ -611,10 +609,9 @@ function bosalt(mesaj){
   drawSteps();
 }
 
-// Kimlik ve bölüm sınırı da tahmini değiştirir: ikisi de fiyatın ve sürenin
-// girdisi. Yalnızca dosya seçimini dinlemek yanlış rakam gösterirdi.
+// Kimlik seçimi de tahmini değiştirir (fiyatlama arka uca göre); yalnızca
+// dosya seçimini dinlemek yanlış rakam gösterirdi.
 $$('input[name="backend"]').forEach(i => i.addEventListener("change", tahminIste));
-$('[name="sections"]').addEventListener("input", tahminIste);
 
 function bitti(){
   calisiyor = false;
@@ -737,7 +734,6 @@ $("#go").addEventListener("click", async () => {
   fd.set("language", secili("language").value);
   fd.set("backend", secili("backend").value);
   fd.set("depth", secili("depth").value);
-  fd.set("sections", $('[name="sections"]').value || "0");
   for (const cb of $$('input[name="extras"]:checked')) fd.append("extras", cb.value);
   try {
     const r = await fetch("/api/jobs", { method: "POST", body: fd });

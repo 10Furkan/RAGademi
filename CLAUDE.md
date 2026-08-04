@@ -40,7 +40,13 @@ exercise the whole Markdown → HTML → KaTeX → PDF chain without an API key.
 
 **Only `build` calls a model.** Everything else runs offline — use `preview` and
 `estimate` to validate request construction and cost before spending money.
-`--sections N` limits a real run to the first N sections.
+`--sections N` limits a real run to the first N sections — **CLI only, and
+deliberately not exposed on the web.** A truncated document is not a summary:
+the missing sections are simply absent, and the "tamamla" button does not bring
+them back (it only re-runs sections that *errored*). On the web the same
+worry — spending before you know the settings are right — is answered by the
+pre-flight estimate strip and demo mode, neither of which produces a document
+the user might mistake for complete.
 
 ### Two auth backends
 

@@ -181,6 +181,22 @@ def test_invalid_extra_rejected(client):
     assert r.status_code == 400
 
 
+def test_section_limit_is_not_a_web_option(client):
+    """Web arayüzünde "ilk N bölüm" yok: kısaltılmış bir ders notu özet değil,
+    eksik bir belgedir ve o eksiği 'tamamla' düğmesi de getirmez. Maliyet
+    kaygısını tahmin şeridi ve demo modu karşılıyor. Alan sunucudan da
+    kaldırıldı; gönderilse bile yok sayılmalı, sessizce koşuyu kırpmamalı."""
+    c = _course(client)
+    lec = _material(client, c["id"], "lecture", "slayt.pdf")
+    book = _material(client, c["id"], "book", "kitap.pdf")
+    r = client.post("/api/jobs", data={
+        "course_id": c["id"], "lecture_id": lec["id"], "book_id": book["id"],
+        "backend": "demo", "sections": "1",
+    })
+    assert r.status_code == 200
+    assert "sections" not in r.json()["params"]
+
+
 def test_mode_selection_is_recorded_on_the_job(client):
     """Seçim işe yazılmazsa arayüzdeki kontrol hiçbir şey yapmıyor demektir."""
     r = client.post(
@@ -539,7 +555,7 @@ def test_full_demo_run_produces_downloadable_pdf(client):
                 "lecture": (LECTURE.name, lf, "application/pdf"),
                 "book": (BOOK.name, bf, "application/pdf"),
             },
-            data={"language": "Türkçe", "sections": "1", "demo": "true"},
+            data={"language": "Türkçe", "demo": "true"},
         )
     assert r.status_code == 200
     jid = r.json()["id"]

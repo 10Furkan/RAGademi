@@ -194,7 +194,6 @@ def _execute(job: Job, emit) -> None:
         _inputs_for(job),
         settings,
         progress=progress,
-        limit_sections=job.params.get("sections") or None,
         on_delta=on_delta,
         llm=llm,
     )
@@ -382,7 +381,6 @@ async def estimate_run(
     book_id: str,
     exam_id: str = "",
     backend: str = "auto",
-    sections: int = 0,
 ) -> dict:
     """Üret'e basmadan önce token / maliyet / süre projeksiyonu.
 
@@ -413,7 +411,6 @@ async def estimate_run(
         settings,
         book_sha=book_mat.sha,
         backend=cozulen,
-        limit_sections=sections or None,
         exam_chars=exam_chars,
         history=library.section_seconds(cozulen),
     )
@@ -539,7 +536,6 @@ async def create_job(
     depth: str = Form("standart"),
     # Çoklu seçim: aynı ad birden çok kez gönderilir (analoji, soru, ...).
     extras: list[str] = Form([]),
-    sections: int = Form(0),
     demo: bool = Form(False),
 ) -> dict:
     if backend not in BACKENDS:
@@ -557,7 +553,6 @@ async def create_job(
             "backend": backend,
             "depth": depth,
             "extras": extras,
-            "sections": sections,
             "demo": demo,
             "course_id": course_id or None,
         }
