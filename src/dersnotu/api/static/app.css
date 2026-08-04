@@ -226,6 +226,14 @@ main{display:grid;grid-template-columns:270px 1fr;gap:36px;padding:32px 0 80px}
 .nm{display:block;word-break:break-word;line-height:1.35}
 .mt{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted);
     margin-top:3px}
+/* Belge türü rozeti. Ders notu rozet ALMIYOR: liste ağırlıklı olarak ders
+   notundan oluşuyor, hepsini etiketlemek gürültü olur — işaretlenen şey
+   istisna olan. Aynı gerekçeyle çerçeveli ve sessiz, dolgulu değil. */
+.tur{display:inline-block;font-family:var(--mono);font-size:9.5px;
+     letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+     border:1px solid var(--rule);border-left:2px solid var(--marker);
+     border-radius:3px;padding:1px 5px 0;margin-right:7px;
+     vertical-align:1px;line-height:1.5}
 .acts{display:flex;gap:4px;flex-shrink:0;align-items:center}
 a.act,button.act{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
      text-transform:uppercase;color:var(--muted);background:transparent;border:none;

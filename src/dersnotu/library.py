@@ -38,9 +38,16 @@ from typing import Any
 # Tür bir etiket değil, işleme yolunu seçen şey.
 KINDS = ("lecture", "book", "exam")
 
+# Üretilen belge türleri. `note` kitapla genişletilmiş ders notu, `practice`
+# geçmiş sınava benzetilerek üretilmiş deneme sınavı. İkisi aynı tabloda
+# duruyor çünkü yaşam döngüleri aynı (üret → oku → indir → sil) ve arama
+# ikisini birden taramalı; ayrıştıkları yer `sections` alanının anlamı
+# (bölüm sayısı / soru sayısı) ve süre kalibrasyonu.
+DOC_KINDS = ("note", "practice")
+
 # `PRAGMA user_version` ile takip edilir. Şema değişince ARTTIR ve `_migrate`
 # içine adımı yaz — kullanıcının kitaplığı silinebilir bir önbellek değil.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS courses (
@@ -75,6 +82,9 @@ CREATE TABLE IF NOT EXISTS documents (
     lecture_id  TEXT REFERENCES materials(id) ON DELETE SET NULL,
     book_id     TEXT REFERENCES materials(id) ON DELETE SET NULL,
     exam_id     TEXT REFERENCES materials(id) ON DELETE SET NULL,
+    -- 'note' | 'practice'. Varsayılanı 'note': göç öncesi yazılmış her satır
+    -- ders notudur, deneme sınavı bu sütunla birlikte geldi.
+    kind        TEXT NOT NULL DEFAULT 'note',
     title       TEXT NOT NULL,
     pdf_path    TEXT,
     md_path     TEXT,
@@ -131,6 +141,11 @@ def _migrate(c: sqlite3.Connection) -> None:
         # SQLite CHECK'i ALTER ile kaldırmaya izin vermiyor.
         _drop_kind_check(c)
 
+    if surum < 3:
+        # Deneme sınavları da `documents` tablosunda duruyor. Varsayılan
+        # 'note' olduğu için var olan satırlar doğru türü kendiliğinden alır.
+        _add_column(c, "documents", "kind", "TEXT NOT NULL DEFAULT 'note'")
+
     c.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
@@ -186,7 +201,9 @@ class Course:
     created_at: str
     lectures: int = 0
     books: int = 0
-    documents: int = 0
+    documents: int = 0  # toplam üretilmiş belge
+    notes: int = 0
+    practices: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -199,6 +216,8 @@ class Course:
                 "lectures": self.lectures,
                 "books": self.books,
                 "documents": self.documents,
+                "notes": self.notes,
+                "practices": self.practices,
             },
         }
 
@@ -242,6 +261,7 @@ class Document:
     language: str
     depth: str
     exam_id: str | None = None
+    kind: str = "note"  # note | practice
     html_path: Path | None = None
     extras: list[str] = field(default_factory=list)
     backend: str = ""
@@ -258,6 +278,7 @@ class Document:
             "lecture_id": self.lecture_id,
             "book_id": self.book_id,
             "exam_id": self.exam_id,
+            "kind": self.kind,
             "title": self.title,
             "language": self.language,
             "depth": self.depth,
@@ -266,6 +287,7 @@ class Document:
             "failed_sections": self.failed,
             "usage": self.usage,
             "duration": round(self.duration),
+            # Ders notunda bölüm, deneme sınavında soru sayısı.
             "sections": self.sections,
             "created_at": self.created_at,
             "has_pdf": bool(self.pdf_path and self.pdf_path.exists()),
@@ -286,11 +308,15 @@ class SearchHit:
     section: int
     heading: str
     snippet: str
+    # Belgenin türü sonuçla birlikte taşınıyor: okuyucudaki çıpa adı türe göre
+    # değişiyor (`#bolum-N` / `#soru-N`) ve arayüz onu bu alandan seçiyor.
+    document_kind: str = "note"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "document_id": self.document_id,
             "document_title": self.document_title,
+            "document_kind": self.document_kind,
             "section": self.section,
             "heading": self.heading,
             "snippet": self.snippet,
@@ -498,12 +524,16 @@ class LibraryStore:
 
     # ----- dokümanlar ----------------------------------------------------
     def add_document(self, **kw: Any) -> Document:
+        kind = kw.get("kind", "note")
+        if kind not in DOC_KINDS:
+            raise ValueError(f"Geçersiz belge türü: {kind}")
         doc = Document(
             id=kw.get("id") or _uid(),
             course_id=kw["course_id"],
             lecture_id=kw.get("lecture_id"),
             book_id=kw.get("book_id"),
             exam_id=kw.get("exam_id"),
+            kind=kind,
             title=kw.get("title", "Ders notu"),
             pdf_path=_as_path(kw.get("pdf_path")),
             md_path=_as_path(kw.get("md_path")),
@@ -522,12 +552,13 @@ class LibraryStore:
         with self._conn() as c:
             c.execute(
                 "INSERT OR REPLACE INTO documents (id, course_id, lecture_id,"
-                " book_id, exam_id, title, pdf_path, md_path, doc_path, html_path,"
+                " book_id, exam_id, kind, title, pdf_path, md_path, doc_path, html_path,"
                 " language, depth, extras, backend, failed, usage, duration,"
                 " sections, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     doc.id, doc.course_id, doc.lecture_id, doc.book_id, doc.exam_id,
+                    doc.kind,
                     doc.title, _as_str(doc.pdf_path), _as_str(doc.md_path),
                     _as_str(doc.doc_path), _as_str(doc.html_path),
                     doc.language, doc.depth, json.dumps(doc.extras),
@@ -566,7 +597,7 @@ class LibraryStore:
             rows = c.execute(
                 "SELECT f.document_id, f.section, f.heading,"
                 "       snippet(doc_fts, 4, '<mark>', '</mark>', '…', 18) AS snip,"
-                "       d.title AS doc_title"
+                "       d.title AS doc_title, d.kind AS doc_kind"
                 "  FROM doc_fts f JOIN documents d ON d.id = f.document_id"
                 " WHERE f.course_id = ? AND doc_fts MATCH ?"
                 " ORDER BY rank LIMIT ?",
@@ -575,19 +606,28 @@ class LibraryStore:
         return [
             SearchHit(
                 document_id=r["document_id"], document_title=r["doc_title"],
+                document_kind=r["doc_kind"],
                 section=r["section"], heading=r["heading"], snippet=r["snip"],
             )
             for r in rows
         ]
 
-    def section_seconds(self, backend: str, limit: int = 10) -> list[float]:
-        """Son koşulardan bölüm başına saniye — süre tahminini kalibre eder."""
+    def section_seconds(
+        self, backend: str, limit: int = 10, kind: str = "note"
+    ) -> list[float]:
+        """Son koşulardan birim başına saniye — süre tahminini kalibre eder.
+
+        `kind` filtresi zorunlu, süs değil: deneme sınavı TEK çağrıda üretilir
+        ve `sections` alanı orada SORU sayısını tutar. Filtresiz bir sorgu
+        "12 soru / 40 saniye" koşusunu "bölüm başına 3 saniye" diye okur ve
+        ders notu tahminini yerle bir eder.
+        """
         with self._conn() as c:
             rows = c.execute(
                 "SELECT duration, sections FROM documents"
-                " WHERE backend = ? AND duration > 0 AND sections > 0"
+                " WHERE backend = ? AND kind = ? AND duration > 0 AND sections > 0"
                 " ORDER BY created_at DESC LIMIT ?",
-                (backend, limit),
+                (backend, kind, limit),
             ).fetchall()
         return [r["duration"] / r["sections"] for r in rows]
 
@@ -658,7 +698,11 @@ SELECT c.*,
   (SELECT COUNT(*) FROM materials m
     WHERE m.course_id = c.id AND m.kind = 'book')    AS books,
   (SELECT COUNT(*) FROM documents d
-    WHERE d.course_id = c.id)                        AS documents
+    WHERE d.course_id = c.id)                        AS documents,
+  (SELECT COUNT(*) FROM documents d
+    WHERE d.course_id = c.id AND d.kind = 'note')     AS notes,
+  (SELECT COUNT(*) FROM documents d
+    WHERE d.course_id = c.id AND d.kind = 'practice') AS practices
 FROM courses c
 """
 
@@ -668,13 +712,15 @@ def _row_to_course(row: sqlite3.Row) -> Course:
         id=row["id"], name=row["name"], code=row["code"], note=row["note"],
         created_at=row["created_at"], lectures=row["lectures"],
         books=row["books"], documents=row["documents"],
+        notes=row["notes"], practices=row["practices"],
     )
 
 
 def _row_to_document(row: sqlite3.Row) -> Document:
     return Document(
         id=row["id"], course_id=row["course_id"], lecture_id=row["lecture_id"],
-        book_id=row["book_id"], exam_id=row["exam_id"], title=row["title"],
+        book_id=row["book_id"], exam_id=row["exam_id"], kind=row["kind"],
+        title=row["title"],
         pdf_path=_as_path(row["pdf_path"]), md_path=_as_path(row["md_path"]),
         doc_path=_as_path(row["doc_path"]), html_path=_as_path(row["html_path"]),
         language=row["language"], depth=row["depth"],

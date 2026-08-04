@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..config import settings
-from ..estimate import project
+from ..estimate import project, project_practice
 from ..index import BookIndex
 from ..library import KINDS, LibraryStore, Material, NotFound
 from ..llm import (
@@ -35,10 +35,14 @@ from ..llm import (
 )
 from ..llm.client import LLMClient
 from ..llm.prompts import DEPTH_HELP, DEPTHS, EXTRA_HELP, EXTRAS
-from ..models import StudyDocument
+from ..models import PracticeExam, StudyDocument
 from ..pdfio import sha256_file
 from ..pipeline import EXAM_CHAR_LIMIT, Inputs, retry_failed, run, save_debug, to_markdown
-from ..render import render_document
+from ..practice import PracticeInputs
+from ..practice import generate as generate_practice
+from ..practice import save_debug as save_practice_debug
+from ..practice import to_markdown as practice_to_markdown
+from ..render import render_document, render_practice
 from ..render.html import build_nav
 from .jobs import Event, Job, JobStatus, JobStore
 
@@ -200,6 +204,103 @@ def _execute(job: Job, emit) -> None:
     _publish(job, doc, emit)
 
 
+def _execute_practice(job: Job, emit) -> None:
+    """Deneme sınavı üretir. Ders notundan farklı olarak tek parça çıktı."""
+    def progress(event: str, detail: str = "") -> None:
+        emit(Event(event, {"detail": detail}))
+
+    p = job.params
+    llm = _pick_backend(p, emit)
+    exam = generate_practice(
+        PracticeInputs(
+            lecture_path=Path(p["paths"]["lecture"]),
+            book_path=Path(p["paths"]["book"]),
+            exam_path=Path(p["paths"]["exam"]),
+            exam_name=p.get("exam_name", ""),
+            language=p["language"],
+            count=int(p.get("count") or 0),
+            backend=p.get("backend", "auto"),
+        ),
+        settings,
+        progress=progress,
+        llm=llm,
+    )
+    _publish_practice(job, exam, emit)
+
+
+def _publish_practice(job: Job, exam: PracticeExam, emit) -> None:
+    """Sınav kâğıdını diske yazar ve kitaplığa işler.
+
+    `_publish` ile aynı dosya adlandırması (`out_stem`) ve aynı iki-tüketici
+    render'ı; ayrıştığı yer belge türü ve kaydedilen sayım — burada `sections`
+    alanı SORU sayısını taşıyor.
+    """
+    job.usage = exam.usage.model_dump()
+
+    stem = job.params.get("out_stem", job.id)
+    out_base = settings.out_dir / stem
+    md_path = out_base.with_suffix(".md")
+    md_path.write_text(practice_to_markdown(exam), encoding="utf-8")
+    job.md_path = md_path
+
+    doc_path = out_base.with_suffix(".doc.json")
+    save_practice_debug(exam, doc_path)
+    job.doc_path = doc_path
+
+    emit(Event("render:start"))
+    nav = ""
+    if cid := job.params.get("course_id"):
+        nav = build_nav(f"/ders/{cid}", "Derse dön", f"/api/documents/{stem}/download")
+    html_path = out_base.with_suffix(".html")
+    pdf_path = render_practice(
+        exam, out_base.with_suffix(".pdf"), nav_html=nav, save_html=html_path
+    )
+    job.pdf_path = pdf_path
+    job.html_path = html_path
+    emit(Event("render:done", {"size": pdf_path.stat().st_size}))
+
+    _record_practice(job, exam)
+
+
+def _record_practice(job: Job, exam: PracticeExam) -> None:
+    p = job.params
+    if not p.get("course_id"):
+        return
+    doc_id = p.get("out_stem", job.id)
+    try:
+        library.add_document(
+            id=doc_id,
+            course_id=p["course_id"],
+            kind="practice",
+            lecture_id=p.get("lecture_id"),
+            book_id=p.get("book_id"),
+            exam_id=p.get("exam_id"),
+            title=Path(p.get("lecture_name", "Deneme sınavı")).stem,
+            pdf_path=job.pdf_path,
+            md_path=job.md_path,
+            doc_path=job.doc_path,
+            html_path=job.html_path,
+            language=p.get("language", ""),
+            backend=p.get("backend", ""),
+            usage=job.usage,
+            duration=job.elapsed,
+            sections=len(exam.questions),
+        )
+        # Sorular da aramaya girer: "two's complement hangi soruda geçiyordu"
+        # sorusunun yanıtı ders notunda olduğu kadar sınav kâğıdında da olmalı.
+        library.index_document(
+            doc_id,
+            p["course_id"],
+            [
+                (q.number, f"Soru {q.number} — {q.topic}".strip(" —"),
+                 "\n".join([q.prompt, *q.choices, q.answer, q.solution]))
+                for q in exam.questions
+            ],
+        )
+    except NotFound:
+        pass  # ders bu arada silinmiş; çıktı yine de diskte
+
+
 def _execute_retry(job: Job, emit) -> None:
     """Önceki işin hatalı bölümlerini yeniden üretir."""
     def progress(event: str, detail: str = "") -> None:
@@ -338,7 +439,8 @@ async def download_document(document_id: str, fmt: str = "pdf") -> FileResponse:
     path = doc.pdf_path if fmt == "pdf" else doc.md_path
     if not (path and path.exists()):
         raise HTTPException(404, "Çıktı diskte yok.")
-    return FileResponse(path, filename=f"{doc.title}-ders-notu.{fmt}")
+    ek = "deneme-sinavi" if doc.kind == "practice" else "ders-notu"
+    return FileResponse(path, filename=f"{doc.title}-{ek}.{fmt}")
 
 
 @app.delete("/api/documents/{document_id}")
@@ -381,6 +483,10 @@ async def estimate_run(
     book_id: str,
     exam_id: str = "",
     backend: str = "auto",
+    # "note" (ders notu) | "practice" (deneme sınavı). İkisi ayrı hesap:
+    # deneme sınavı tek çağrı, cache'siz, görüntüsüz.
+    mode: str = "note",
+    count: int = 0,
 ) -> dict:
     """Üret'e basmadan önce token / maliyet / süre projeksiyonu.
 
@@ -404,6 +510,18 @@ async def estimate_run(
         lec = _parsed_lecture(lec_mat)
     except Exception as exc:
         raise HTTPException(400, f"Ders PDF'i okunamadı: {exc}") from exc
+
+    if mode == "practice":
+        pp = project_practice(
+            lec,
+            settings,
+            book_sha=book_mat.sha,
+            backend=cozulen,
+            exam_chars=exam_chars,
+            count=count,
+            history=library.section_seconds(cozulen, kind="practice"),
+        )
+        return {**pp.to_dict(), "backend": cozulen, "quota": last_rate_limit()}
 
     p = project(
         lec,
@@ -432,10 +550,11 @@ async def read_document(course_id: str, document_id: str) -> str:
     except NotFound as exc:
         raise HTTPException(404, str(exc)) from exc
     if not (doc.html_path and doc.html_path.exists()):
+        ne = "deneme sınavının" if doc.kind == "practice" else "ders notunun"
         raise HTTPException(
             404,
-            "Bu ders notunun okunabilir sürümü yok (eski bir koşudan kalmış). "
-            "PDF'i indirebilir ya da eksikleri tamamlayıp yeniden üretebilirsin.",
+            f"Bu {ne} okunabilir sürümü yok (eski bir koşudan kalmış). "
+            "PDF'i indirebilir ya da yeniden üretebilirsin.",
         )
     return doc.html_path.read_text(encoding="utf-8")
 
@@ -619,6 +738,50 @@ def _material_for(kind: str, material_id: str, course_id: str) -> Material:
     if not (mat.path and mat.path.exists()):
         raise HTTPException(400, f"Dosya diskte yok: {mat.name}")
     return mat
+
+
+@app.post("/api/practice")
+async def create_practice_job(
+    lecture_id: str = Form(...),
+    book_id: str = Form(...),
+    # Ders notunda sınav kâğıdı isteğe bağlıydı; burada ŞABLON o, zorunlu.
+    exam_id: str = Form(...),
+    course_id: str = Form(""),
+    language: str = Form("Türkçe"),
+    backend: str = Form("auto"),
+    # 0 = geçmiş kâğıtta kaç soru varsa o kadar.
+    count: int = Form(0),
+    demo: bool = Form(False),
+) -> dict:
+    if backend not in BACKENDS:
+        raise HTTPException(400, f"Geçersiz arka uç: {backend}. Seçenekler: {', '.join(BACKENDS)}")
+    if not 0 <= count <= 40:
+        raise HTTPException(400, "Soru sayısı 0-40 arasında olmalı (0 = kâğıttaki kadar).")
+    if course_id:
+        _course_or_404(course_id)
+
+    job = store.create({
+        "language": language,
+        "backend": backend,
+        "count": count,
+        "demo": demo,
+        "course_id": course_id or None,
+        "kind": "practice",
+    })
+    job.params["out_stem"] = job.id
+
+    paths: dict[str, str] = {}
+    for name, mid in (("lecture", lecture_id), ("book", book_id), ("exam", exam_id)):
+        mat = _material_for(name, mid, course_id)
+        paths[name] = str(mat.path)
+        job.params[f"{name}_id"] = mat.id
+        job.params[f"{name}_name"] = mat.name
+        job.params["course_id"] = job.params["course_id"] or mat.course_id
+    job.params["paths"] = paths
+    job.params["book_cached"] = BookIndex.is_built(settings.cache_dir, sha256_file(paths["book"]))
+
+    store.submit(job, _execute_practice)
+    return job.to_dict()
 
 
 @app.post("/api/jobs/{job_id}/retry")

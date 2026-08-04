@@ -20,6 +20,9 @@ header{padding:34px 0 22px}
          margin-bottom:10px}
 .colhead .lab{margin:0}
 .drop.slim{min-height:44px;padding:11px 13px;font-size:12.5px;justify-content:center}
+/* Seçim özeti. Dosya adı taşıdığı için asla büyütülmez — bkz. course.html
+   içindeki #sinavSecim notu. */
+.secim{margin:16px 0 0;font-size:13px;color:var(--muted);line-height:1.6}
 .hint{font-size:12px;color:var(--muted);margin:10px 0 0}
 #out{margin-bottom:22px}
 .warn{font-family:var(--mono);font-size:10px;color:var(--danger);
@@ -158,18 +161,56 @@ header{padding:34px 0 22px}
         <div class="tahmin" id="tahmin" hidden></div>
       </section>
 
+      <!-- 2b. Geçmiş sınava benzer sorular -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Deneme sınavı üret</h2>
+        </div>
+        <p class="sub">Geçmiş kâğıt <b>biçimi</b> verir (soru tipi, uzunluk, puan,
+           zorluk), slaytlar <b>kapsamı</b>, kitap <b>doğruluğu</b>. Sorular
+           kopyalanmaz; örnek alınan soru cevap anahtarında birebir alıntılanır.</p>
+
+        <div class="modes">
+          <div>
+            <span class="lab">Soru sayısı</span>
+            <div class="seg">
+              <label><input type="radio" name="count" value="0" checked><span>Kâğıttaki kadar</span></label>
+              <label><input type="radio" name="count" value="5"><span>5</span></label>
+              <label><input type="radio" name="count" value="10"><span>10</span></label>
+              <label><input type="radio" name="count" value="20"><span>20</span></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bu satır DOSYA ADI taşıyor, o yüzden `.lab` DEĞİL: `.lab`
+             büyütüyor ve sayfa lang="tr" olduğu için "Bitsints" → "BİTSİNTS"
+             oluyordu. İngilizce bir dosya adını Türkçe kurallarıyla büyütmek
+             onu bozar. Üstteki panelin `#secim` satırıyla aynı biçim. -->
+        <p class="secim" id="sinavSecim"></p>
+
+        <div class="opts" style="margin-top:14px">
+          <!-- Kimlik ve dil YUKARIDAKİ panelden okunur. İkinci bir kimlik
+               seçici koymak, iki seçimin ayrışıp kullanıcının hangisinin
+               geçerli olduğunu bilememesi demekti. -->
+          <span class="lab" style="margin:0">Kimlik ve dil yukarıdaki seçimden</span>
+          <button id="goSinav" style="margin-left:auto" disabled>Deneme sınavı oluştur</button>
+        </div>
+
+        <div class="tahmin" id="tahminSinav" hidden></div>
+      </section>
+
       <!-- 3. Canlı çıktı: bir iş başlayana kadar yok -->
       <section class="out empty" id="out" hidden></section>
 
       <!-- 4. Ne ürettim -->
       <section class="panel">
         <div class="panel-head">
-          <h2>Ders notları</h2>
+          <h2>Üretilenler</h2>
           <span class="lab" id="sayNot"></span>
         </div>
         <div class="search">
           <input type="text" id="q" autocomplete="off"
-                 placeholder="Bu dersin tüm notlarında ara — ör. ikinin tümleyeni">
+                 placeholder="Notlarda ve deneme sorularında ara — ör. ikinin tümleyeni">
           <button class="ghost" id="qclear" hidden>temizle</button>
         </div>
         <div class="rows" id="docs"></div>
@@ -272,6 +313,14 @@ function materyalHTML(m, group){
 
 function cizMateryal(){
   const bos = t => `<p class="empty-note">${t}</p>`;
+  // Liste her `yukle()` çağrısında yeniden çiziliyor — üretim bittikten sonra
+  // da. Seçim korunmazsa sınav kâğıdı "Kullanma"ya döner ve arka arkaya iki
+  // deneme üretmek isteyen kullanıcı her seferinde kâğıdı yeniden seçer.
+  const onceki = {
+    lecture_id: deger("lecture_id"),
+    book_id: deger("book_id"),
+    exam_id: secili("exam_id") ? deger("exam_id") : null,
+  };
   $("#lectures").innerHTML = ders.lectures.length
     ? ders.lectures.map(m => materyalHTML(m, "lecture_id")).join("")
     : bos("Henüz slayt yok.");
@@ -295,6 +344,14 @@ function cizMateryal(){
   for (const [g, list] of [["lecture_id", ders.lectures], ["book_id", ders.books]])
     if (list.length) document.querySelector(`input[name="${g}"]`).checked = true;
 
+  // Sonra önceki seçimi geri koy — materyal hâlâ duruyorsa. Silinmişse
+  // varsayılan yerinde kalır, kırık bir seçime yapışıp kalmayız.
+  for (const [g, v] of Object.entries(onceki)) {
+    if (v === null) continue;
+    const geri = document.querySelector(`input[name="${g}"][value="${CSS.escape(v)}"]`);
+    if (geri) geri.checked = true;
+  }
+
   $$("[data-delmat]").forEach(b => b.addEventListener("click", silMateryal));
   $$('input[name="lecture_id"],input[name="book_id"],input[name="exam_id"]')
     .forEach(i => i.addEventListener("change", tazeleSecim));
@@ -302,11 +359,18 @@ function cizMateryal(){
 
 function dokumanHTML(d){
   const eksik = (d.failed_sections || []).length;
-  const alt = [tarih(d.created_at), d.depth, (d.extras || []).join(", "),
-               d.exam_id ? "sınav odaklı" : null,
-               d.backend === "demo" ? "demo" : null,
-               d.duration ? sure(d.duration) : null,
-              ].filter(Boolean).join(" · ");
+  const sinav = d.kind === "practice";
+  // İki belge türü aynı listede duruyor; ayırt eden şey rozet ve alt satır.
+  // Ayrı panel açmak sayfayı uzatır, rozetin söylemediği bir şey söylemezdi.
+  const alt = sinav
+    ? [tarih(d.created_at), `${d.sections} soru`,
+       d.backend === "demo" ? "demo" : null,
+       d.duration ? sure(d.duration) : null].filter(Boolean).join(" · ")
+    : [tarih(d.created_at), d.depth, (d.extras || []).join(", "),
+       d.exam_id ? "sınav odaklı" : null,
+       d.backend === "demo" ? "demo" : null,
+       d.duration ? sure(d.duration) : null,
+      ].filter(Boolean).join(" · ");
   const acts = [
     d.has_html ? `<a class="act oku" href="/ders/${CID}/not/${d.id}">oku</a>` : "",
     d.has_pdf ? `<a class="act" href="/api/documents/${d.id}/download">pdf</a>` : "",
@@ -316,7 +380,7 @@ function dokumanHTML(d){
   ].join("");
   return `<div class="row">
     <span class="grow">
-      <span class="nm">${esc(d.title)}</span>
+      <span class="nm">${sinav ? `<span class="tur">deneme</span>` : ""}${esc(d.title)}</span>
       <span class="mt">${alt}</span>
     </span>
     ${eksik ? `<span class="warn">${eksik} bölüm eksik</span>` : ""}
@@ -327,7 +391,7 @@ function dokumanHTML(d){
 function cizDokuman(){
   $("#docs").innerHTML = ders.documents.length
     ? ders.documents.map(dokumanHTML).join("")
-    : `<p class="empty-note">Henüz ders notu üretilmedi.</p>`;
+    : `<p class="empty-note">Henüz bir şey üretilmedi.</p>`;
   $("#sayNot").textContent = ders.documents.length || "";
   $$("[data-deldoc]").forEach(b => b.addEventListener("click", silDokuman));
   $$("[data-retrydoc]").forEach(b => b.addEventListener("click", tamamla));
@@ -339,7 +403,7 @@ function cizOzet(){
   $("#railbaslik").textContent = "Ders özeti";
   $("#ozet").innerHTML = `<div class="meta" style="margin-top:0;border-top:none;padding-top:0">
     slayt <b>${n.lectures}</b><br>kitap <b>${n.books}</b><br>
-    ders notu <b>${n.documents}</b><br>
+    ders notu <b>${n.notes}</b><br>deneme sınavı <b>${n.practices}</b><br>
     oluşturuldu <b>${tarih(ders.created_at)}</b></div>`;
 }
 
@@ -356,7 +420,18 @@ function tazeleSecim(){
     ? `<b>${esc(ad(l.value))}</b> slaytları, <b>${esc(ad(b.value))}</b> kitabından anlatılacak`
       + (sinav ? `, <b>${esc(ad(sinav))}</b> sorularına göre derinleştirilecek.` : ".")
     : "Yukarıdan bir slayt ve bir kitap seç.";
+
+  // Deneme sınavında geçmiş kâğıt ŞABLON: ders notunda isteğe bağlıydı,
+  // burada olmadan üretilecek bir "benzer soru" da yok.
+  $("#goSinav").disabled = !(l && b && sinav) || calisiyor;
+  $("#sinavSecim").innerHTML = !(l && b)
+    ? "Önce bir slayt ve bir kitap seç."
+    : !sinav
+      ? "Geçmiş sınavlardan birini seç — şablon o."
+      : `<b>${esc(ad(sinav))}</b> biçiminde, <b>${esc(ad(l.value))}</b> kapsamında.`;
+
   tahminIste();
+  tahminSinavIste();
 }
 
 // --- maliyet / süre / kota şeridi ----------------------------------------
@@ -392,8 +467,39 @@ function tahminIste(){
   }, 350);
 }
 
-function cizTahmin(t){
-  const kutu = $("#tahmin");
+// Deneme sınavının kendi şeridi: hesabı da ayrı (tek çağrı, cache yok,
+// görüntü yok), o yüzden ders notunun rakamlarını göstermek yanlış olurdu.
+let sinavZaman = null, sinavSira = 0;
+
+function tahminSinavIste(){
+  const l = secili("lecture_id"), b = secili("book_id"), s = deger("exam_id");
+  const kutu = $("#tahminSinav");
+  if (!(l && b && s) || calisiyor) { kutu.hidden = true; return; }
+  clearTimeout(sinavZaman);
+  kutu.hidden = false;
+  kutu.className = "tahmin bekliyor";
+  kutu.textContent = "hesaplanıyor…";
+  const sira = ++sinavSira;
+  sinavZaman = setTimeout(async () => {
+    const p = new URLSearchParams({
+      mode: "practice", lecture_id: l.value, book_id: b.value, exam_id: s,
+      count: deger("count") || "0", backend: deger("backend") || "auto",
+    });
+    try {
+      const r = await fetch(`/api/estimate?${p}`);
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      const t = await r.json();
+      if (sira !== sinavSira) return;
+      cizTahmin(t, kutu, `~<b>${t.questions}</b> soru`);
+    } catch (err) {
+      if (sira !== sinavSira) return;
+      kutu.className = "tahmin";
+      kutu.textContent = `tahmin yapılamadı — ${err.message}`;
+    }
+  }, 350);
+}
+
+function cizTahmin(t, kutu = $("#tahmin"), ilk = null){
   kutu.className = "tahmin";
   const dk = t.seconds < 90 ? `${Math.round(t.seconds)} sn` : `${Math.round(t.seconds / 60)} dk`;
   const tok = (t.tokens.total_input / 1000).toFixed(0);
@@ -403,7 +509,7 @@ function cizTahmin(t){
       ? "<b>ücretsiz</b> (model çağrılmaz)"
       : `<b>~$${t.cost.toFixed(2)}</b>`;
   const parcalar = [
-    `<b>${t.sections}</b> bölüm`,
+    ilk || `<b>${t.sections}</b> bölüm`,
     `~<b>${tok}K</b> token giriş`,
     bedel,
     `~<b>${dk}</b>${t.seconds_source === "geçmiş" ? " (geçmiş koşulardan)" : ""}`,
@@ -485,7 +591,7 @@ async function silMateryal(e){
 async function silDokuman(e){
   e.preventDefault(); e.stopPropagation();
   const { deldoc: id, name } = e.currentTarget.dataset;
-  if (!confirm(`"${name}" ders notu silinsin mi?\n\nPDF ve Markdown dosyaları da silinir.`)) return;
+  if (!confirm(`"${name}" silinsin mi?\n\nPDF ve Markdown dosyaları da silinir.`)) return;
   const r = await fetch(`/api/documents/${id}`, { method: "DELETE" });
   if (!r.ok) { alert("Silinemedi."); return; }
   yukle();
@@ -563,7 +669,10 @@ fetch("/api/health").then(r => r.json()).then(h => {
 });
 
 // --- üretim ---------------------------------------------------------------
-const STEPS = [
+// İki üretimin adımları farklı: deneme sınavında hizalama yok, bölüm bölüm
+// yazma yok. Tek bir listeyi ikisine birden göstermek, yarısı hiç yeşile
+// dönmeyen bir ilerleme rayı demek olurdu.
+const STEPS_NOT = [
   ["lecture",  "Slaytlar ayrıştırılıyor"],
   ["book",     "Kitap indeksleniyor"],
   ["topics",   "Konu kartları çıkarılıyor"],
@@ -571,6 +680,19 @@ const STEPS = [
   ["section",  "Bölümler yazılıyor"],
   ["render",   "PDF basılıyor"],
 ];
+const STEPS_SINAV = [
+  ["exam",      "Sınav kâğıdı okunuyor"],
+  ["lecture",   "Slaytlar ayrıştırılıyor"],
+  ["book",      "Kitap indeksleniyor"],
+  ["topics",    "Konu kartları çıkarılıyor"],
+  ["retrieve",  "Kitap alıntıları toplanıyor"],
+  ["questions", "Sorular yazılıyor"],
+  ["render",    "PDF basılıyor"],
+];
+// İlerleme rayında hangi olay grubunun adım sayıldığı; ikisinin birleşimi.
+const STEP_GROUPS = ["lecture", "book", "topics", "align", "render",
+                     "exam", "retrieve", "questions"];
+let STEPS = STEPS_NOT;
 const state = {};
 
 function drawSteps(){
@@ -594,26 +716,35 @@ function sectionEl(i){
   return el;
 }
 
-function bosalt(mesaj){
+function bosalt(mesaj, adimlar = STEPS_NOT){
   calisiyor = true;
   sections = {};
+  STEPS = adimlar;
   for (const k in state) delete state[k];
   $("#railbaslik").textContent = "İlerleme";
   $("#ozet").innerHTML = "";
   $("#go").disabled = true; $("#go").textContent = "Çalışıyor…";
+  $("#goSinav").disabled = true;
   metaEl.hidden = true; dlEl.hidden = true; $("#retrybox").hidden = true;
-  $("#tahmin").hidden = true;  // koşu başladı, tahminin işi bitti
+  // Koşu başladı, tahminlerin işi bitti.
+  $("#tahmin").hidden = true; $("#tahminSinav").hidden = true;
   outEl.hidden = false; outEl.className = "out empty"; outEl.textContent = mesaj;
   drawSteps();
 }
 
 // Kimlik seçimi de tahmini değiştirir (fiyatlama arka uca göre); yalnızca
 // dosya seçimini dinlemek yanlış rakam gösterirdi.
-$$('input[name="backend"]').forEach(i => i.addEventListener("change", tahminIste));
+$$('input[name="backend"]').forEach(i => {
+  i.addEventListener("change", tahminIste);
+  i.addEventListener("change", tahminSinavIste);
+});
+// Soru sayısı hem süreyi hem çıktı tokenını değiştirir.
+$$('input[name="count"]').forEach(i => i.addEventListener("change", tahminSinavIste));
 
 function bitti(){
   calisiyor = false;
   $("#go").textContent = "Ders notu oluştur";
+  $("#goSinav").textContent = "Deneme sınavı oluştur";
   tazeleSecim();
 }
 
@@ -644,9 +775,11 @@ function follow(job){
       }
       return;
     }
-    if (["lecture", "book", "topics", "align", "render"].includes(group)) {
+    if (STEP_GROUPS.includes(group)) {
       state[group] = { active: true, detail: d.detail || "" };
-      if (d.type.endsWith(":done") || d.type.endsWith(":cached"))
+      // `exam:loaded` bir bitiş olayı ama adı ":done" ile bitmiyor; listeye
+      // alınmazsa sınav adımı koşu boyunca "sürüyor" görünürdü.
+      if (/:(done|cached|loaded)$/.test(d.type))
         state[group] = { done: true, detail: d.detail || "" };
       drawSteps(); return;
     }
@@ -743,6 +876,31 @@ $("#go").addEventListener("click", async () => {
   }
 });
 
+$("#goSinav").addEventListener("click", async () => {
+  const l = secili("lecture_id"), b = secili("book_id"), s = deger("exam_id");
+  if (!(l && b && s)) return;
+  // Sorular yapısal JSON olarak tek çağrıda geliyor: akıtılacak metin yok.
+  // Boş bir çıktı paneli beklemek yerine neden boş olduğunu söylüyoruz.
+  bosalt("Sorular tek çağrıda yazılıyor — bitince kâğıt hazır olacak.", STEPS_SINAV);
+  $("#goSinav").textContent = "Çalışıyor…";
+  const fd = new FormData();
+  fd.set("course_id", CID);
+  fd.set("lecture_id", l.value);
+  fd.set("book_id", b.value);
+  fd.set("exam_id", s);
+  fd.set("count", deger("count") || "0");
+  fd.set("language", secili("language").value);
+  fd.set("backend", secili("backend").value);
+  try {
+    const r = await fetch("/api/practice", { method: "POST", body: fd });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    follow(await r.json());
+  } catch (err) {
+    outEl.className = "out"; outEl.innerHTML = `<div class="err">${esc(err.message)}</div>`;
+    bitti();
+  }
+});
+
 // --- arama ----------------------------------------------------------------
 let aramaZaman = null;
 
@@ -755,12 +913,18 @@ function cizHits(veri){
   }
   // snippet() sunucudan <mark> ile geliyor; gövde bu yüzden kaçırılmıyor,
   // ama başlık ve kullanıcının sorgusu HER ZAMAN kaçırılıyor.
-  kutu.innerHTML = `<p class="lab">${veri.hits.length} sonuç</p>` + veri.hits.map(h =>
-    `<a class="hit" href="/ders/${CID}/not/${h.document_id}#bolum-${h.section}">
-       <span class="hh">${esc(h.heading)}</span>
+  kutu.innerHTML = `<p class="lab">${veri.hits.length} sonuç</p>` + veri.hits.map(h => {
+    // Çıpa adı belge türüne göre değişiyor: ders notunda bölüm, deneme
+    // sınavında soru. Sabit `#bolum-` yazmak sınav sonuçlarını sayfanın
+    // başına düşürürdü — bağlantı çalışır ama yanlış yere gider.
+    const sinav = h.document_kind === "practice";
+    const capa = sinav ? `soru-${h.section}` : `bolum-${h.section}`;
+    return `<a class="hit" href="/ders/${CID}/not/${h.document_id}#${capa}">
+       <span class="hh">${sinav ? `<span class="tur">deneme</span>` : ""}${esc(h.heading)}</span>
        <span class="hd">${esc(h.document_title)}</span>
        <span class="hs">${h.snippet}</span>
-     </a>`).join("");
+     </a>`;
+  }).join("");
 }
 
 async function ara(){

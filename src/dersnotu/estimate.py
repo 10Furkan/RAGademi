@@ -28,7 +28,7 @@ from .config import Settings
 from .index import BookIndex, estimate_tokens
 from .index.chunker import CHARS_PER_TOKEN
 from .llm.client import PRICING
-from .llm.prompts import EXPAND_SYSTEM, build_lecture_context
+from .llm.prompts import EXPAND_SYSTEM, PRACTICE_SYSTEM, build_lecture_context
 from .models import Lecture
 from .pdfio.render import render_pages
 
@@ -112,6 +112,145 @@ def seconds_per_section(backend: str, history: list[float] | None = None) -> tup
     if history:
         return statistics.median(history), "geçmiş"
     return FALLBACK_SECONDS.get(backend, FALLBACK_SECONDS["api"]), "tahmin"
+
+
+# --- Deneme sınavı ---------------------------------------------------------
+# Soru başına beklenen çıktı: soru metni + şıklar + adım adım çözüm.
+_OUTPUT_PER_QUESTION = 420
+# Kâğıtta kaç soru olduğunu önceden bilmiyoruz (metni okumadan sayılmıyor);
+# "kâğıttaki kadar" seçildiğinde tipik bir vize uzunluğu varsayılıyor.
+_ASSUMED_QUESTIONS = 8
+# Geçmiş koşu yokken tek çağrılık üretimin kaba süresi. `api` ölçekli bir
+# çağrı ders notunun bir bölümünden uzun (çıktı daha büyük), `cli` yine bir
+# abonelik turu. Konu kartları çağrısı da bunun içinde.
+FALLBACK_PRACTICE_SECONDS = {"api": 75.0, "cli": 260.0, "demo": 2.0}
+
+
+@dataclass
+class PracticeProjection:
+    """Deneme sınavı üretiminin projeksiyonu.
+
+    Ders notundan yapıca farklı: cache yok (tek çağrı, paylaşılacak önek yok),
+    görüntü yok (slaytlar metin olarak gidiyor, şema göndermeye gerek yok).
+    Ayrı bir tip bu yüzden — `Projection`'ın yarısı boş kalırdı ve arayüz
+    anlamsız sıfırlar gösterirdi.
+    """
+
+    model: str
+    questions: int
+    input_tokens: float
+    output_tokens: float
+    cheap_input: float
+    cheap_output: float
+    cost: float
+    seconds: float
+    seconds_source: str
+    book_indexed: bool
+    index_seconds: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "mode": "practice",
+            "model": self.model,
+            "questions": self.questions,
+            "tokens": {
+                "total_input": round(self.input_tokens),
+                "output": round(self.output_tokens),
+                "cheap_input": round(self.cheap_input),
+                "cheap_output": round(self.cheap_output),
+            },
+            "cost": round(self.cost, 3),
+            "seconds": round(self.seconds),
+            "seconds_source": self.seconds_source,
+            "book_indexed": self.book_indexed,
+            "index_seconds": round(self.index_seconds),
+        }
+
+
+def project_practice(
+    lecture: Lecture,
+    settings: Settings,
+    *,
+    book_sha: str | None = None,
+    model: str | None = None,
+    backend: str = "api",
+    exam_chars: int = 0,
+    count: int = 0,
+    history: list[float] | None = None,
+) -> PracticeProjection:
+    """Deneme sınavı için token/maliyet/süre projeksiyonu.
+
+    Süre `history` verildiğinde SORU BAŞINA saniyenin medyanından ölçekleniyor.
+    Tek çağrılık bir üretimde bu tam doğru değil (sabit bir kurulum payı var),
+    ama çıktı büyüklüğüyle birlikte büyüdüğü için doğru yönde: 20 soruluk bir
+    kâğıt 5 soruluktan uzun sürer.
+    """
+    model = model or settings.model
+    soru = count if count > 0 else _ASSUMED_QUESTIONS
+
+    # İstek gövdesi: sistem promptu + slayt metinleri + sınav kâğıdı + alıntılar.
+    slayt_tokens = sum(estimate_tokens(s.text) + estimate_tokens(s.title) for s in lecture.slides)
+    sinav_tokens = min(exam_chars, EXAM_CHAR_LIMIT) // CHARS_PER_TOKEN
+
+    avg_chunk = float(settings.chunk_target_tokens)
+    book_indexed = False
+    index_seconds = 0.0
+    if book_sha and BookIndex.is_built(settings.cache_dir, book_sha):
+        idx = BookIndex(BookIndex.path_for(settings.cache_dir, book_sha))
+        try:
+            avg_chunk = float(
+                idx.conn.execute("SELECT AVG(token_estimate) FROM chunks").fetchone()[0]
+                or settings.chunk_target_tokens
+            )
+            book_indexed = True
+        finally:
+            idx.close()
+    else:
+        index_seconds = 25.0 + (95.0 if settings.extract_book_figures else 0.0)
+
+    from .practice import CHUNKS_PER_SECTION, MAX_CHUNKS
+
+    alinti = min(len(lecture.sections) * CHUNKS_PER_SECTION, MAX_CHUNKS) * avg_chunk
+
+    input_tokens = (
+        estimate_tokens(PRACTICE_SYSTEM) + slayt_tokens + sinav_tokens + alinti
+    )
+    output_tokens = float(soru * _OUTPUT_PER_QUESTION)
+    # Konu kartları çağrısı (ucuz model) — retrieval sorgusunu kuruyor.
+    cheap_input = float(slayt_tokens + _CHEAP_INPUT_PAD)
+    cheap_output = float(_CHEAP_OUTPUT)
+
+    inp_price, out_price = PRICING.get(model, (3.0, 15.0))
+    cheap_in, cheap_out = PRICING.get(settings.cheap_model, (1.0, 5.0))
+    cost = (
+        input_tokens * inp_price
+        + output_tokens * out_price
+        + cheap_input * cheap_in
+        + cheap_output * cheap_out
+    ) / 1_000_000
+    if backend in ("cli", "demo"):
+        cost = 0.0  # abonelik kotası harcanır, para değil
+
+    if history:
+        per, source = statistics.median(history), "geçmiş"
+        seconds = per * soru
+    else:
+        seconds = FALLBACK_PRACTICE_SECONDS.get(backend, FALLBACK_PRACTICE_SECONDS["api"])
+        source = "tahmin"
+
+    return PracticeProjection(
+        model=model,
+        questions=soru,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cheap_input=cheap_input,
+        cheap_output=cheap_output,
+        cost=cost,
+        seconds=seconds + index_seconds,
+        seconds_source=source,
+        book_indexed=book_indexed,
+        index_seconds=index_seconds,
+    )
 
 
 def project(

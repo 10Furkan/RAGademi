@@ -159,6 +159,62 @@ class Usage(BaseModel):
         self.calls += other.calls
 
 
+class PracticeQuestion(BaseModel):
+    """Geçmiş sınava BAKILARAK üretilmiş yeni bir soru.
+
+    `modeled_on` bu modelin can damarı: örnek alınan geçmiş soru BİREBİR
+    buraya yazılır. Boşsa "bu tarz sınavda çıkmıştı" iddiası da yoktur —
+    kitap atıfı kuralının sınav kâğıdına uygulanmış hâli. Render katmanı
+    boş alanı sessizce atlar, uydurma bir gerekçe basmaz.
+    """
+
+    number: int
+    kind: str = ""  # çoktan seçmeli | hesaplama | doğru-yanlış | açık uçlu | kod okuma
+    points: int = 0
+    topic: str = ""
+    # Sorunun dayandığı slaytlar — kapsam kanıtı. Boş liste, soruyu kapsam
+    # dışı yapmaz ama gözden geçirilmesi gerektiğini söyler.
+    slides: list[int] = Field(default_factory=list)
+    prompt: str = ""
+    choices: list[str] = Field(default_factory=list)  # çoktan seçmeli değilse boş
+    answer: str = ""
+    solution: str = ""
+    citations: list[str] = Field(default_factory=list)
+    modeled_on: str = ""  # geçmiş sınavdan birebir alıntı
+
+    @property
+    def has_choices(self) -> bool:
+        return len(self.choices) >= 2
+
+
+class PracticeExam(BaseModel):
+    """Üretilmiş deneme sınavı.
+
+    Ders notundan farklı olarak tek parça: bir bölüm patlayınca kalanı
+    kurtarılabilen bir yapı değil, tek çağrının ürünü. O yüzden `failed`
+    benzeri bir alan yok — çağrı ya bir kâğıt üretir ya da iş hata verir.
+    """
+
+    lecture_title: str
+    language: str
+    source_exam: str = ""  # örnek alınan sınav kâğıdının dosya adı
+    # Modelin geçmiş kâğıtta GÖZLEMLEDİĞİ biçim, kendi cümleleriyle. Kapakta
+    # basılıyor: neye benzetildiğini görmeden "benzer" iddiası denetlenemez.
+    profile: str = ""
+    duration_minutes: int = 0
+    questions: list[PracticeQuestion] = Field(default_factory=list)
+    usage: Usage = Field(default_factory=Usage)
+
+    @property
+    def total_points(self) -> int:
+        return sum(q.points for q in self.questions)
+
+    @property
+    def grounded(self) -> list[PracticeQuestion]:
+        """Geçmiş bir soruyu birebir alıntılayabilen sorular."""
+        return [q for q in self.questions if q.modeled_on.strip()]
+
+
 class StudyDocument(BaseModel):
     """Boru hattının nihai çıktısı."""
 

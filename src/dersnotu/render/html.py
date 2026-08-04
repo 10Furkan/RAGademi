@@ -403,6 +403,84 @@ blockquote p:last-child { margin-bottom: 0; }
   white-space: nowrap;
 }
 
+/* --- Deneme sınavı ----------------------------------------------------
+   Soru bir İŞ birimidir: üstünde cetvel, künyesi mono, puanı sağda — sınav
+   kâğıdı jesti. Kutu YOK; sekiz soruyu üst üste kutulamak sayfayı kafese
+   çevirir, oysa burada kutulanacak tek şey "kendini sına" bloğu zaten var. */
+.exam-profile {
+  font-size: 9.6pt;
+  color: var(--ink-muted);
+  padding-left: 3mm;
+  border-left: 2px solid var(--rule);
+  margin: 0 0 3mm;
+}
+.exam-source {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 7.6pt;
+  color: var(--ink-muted);
+  margin: 0 0 8mm;
+}
+
+.exam-q, .exam-a {
+  border-top: 1px solid var(--rule);
+  padding-top: 2.5mm;
+  margin: 0 0 7mm;
+  break-inside: avoid;
+}
+.qhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4mm;
+  margin-bottom: 2.2mm;
+}
+.qnum {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 7.6pt;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.qhead .pts {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 7.4pt;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  text-decoration: none;
+}
+.qhead a.pts:hover { color: var(--ink); }
+
+/* Şıklar: A) B) C). Harf `list-style` ile geliyor, metne yazılmıyor —
+   model şık harfini kendi yazsaydı numaralandırma iki kez basılırdı. */
+.choices {
+  list-style: upper-alpha;
+  padding-left: 7mm;
+  margin: 2mm 0 0;
+}
+.choices li { margin-bottom: 1.4mm; }
+.choices li::marker {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 8.6pt;
+  color: var(--ink-muted);
+}
+
+/* Anahtar ayrı sayfada başlar: çözüm soruyla aynı yaprakta olursa kâğıt
+   denemelik olmaktan çıkar. */
+.exam-key { break-before: page; margin-top: 10mm; }
+.exam-key > h2 { margin-top: 0; }
+.exam-a { border-top-style: dotted; }
+.answer { font-size: 10.5pt; }
+.answer b { font-variant: all-small-caps; letter-spacing: 0.04em; }
+.exam-a .callout-exam { margin: 3mm 0 0; }
+.exam-a .callout-exam blockquote {
+  background: none;
+  border-left: none;
+  padding: 0;
+  margin: 0;
+  font-size: 9.2pt;
+  color: var(--ink-muted);
+}
+
 /* --- Hata bloğu ------------------------------------------------------- */
 .failed {
   border: 1px dashed #C4574C;
@@ -432,7 +510,7 @@ _TEMPLATE = """<!doctype html>
 {nav}
 <div class="page">
   <header class="cover">
-    <div class="eyebrow">Ders notu · kitapla genişletilmiş</div>
+    <div class="eyebrow">{eyebrow}</div>
     <h1>{title}</h1>
     <div class="meta">{meta}</div>
   </header>
@@ -534,13 +612,15 @@ def build_nav(course_href: str, course_name: str, pdf_href: str = "") -> str:
 
 
 def build_page(*, title: str, body_html: str, meta: str, toc_html: str,
-               lang: str = "tr", nav_html: str = "") -> str:
+               lang: str = "tr", nav_html: str = "",
+               eyebrow: str = "Ders notu · kitapla genişletilmiş") -> str:
     from .markdown import pygments_css
 
     return _TEMPLATE.format(
         lang=lang,
         title=title,
         meta=meta,
+        eyebrow=eyebrow,
         toc=toc_html,
         body=body_html,
         nav=nav_html,

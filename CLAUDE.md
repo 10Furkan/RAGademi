@@ -26,6 +26,7 @@ dersnotu preview  <lecture.pdf> <book.pdf> -s 2 # dump the exact API request bod
 dersnotu render   [doc.json] --lecture <lecture.pdf> [-o out.pdf] [--html]
 dersnotu build    <lecture.pdf> <book.pdf> --sections 1   # real run (needs credentials)
 dersnotu retry    <doc.json> <lecture.pdf> <book.pdf>     # re-run only failed sections
+dersnotu practice <lecture.pdf> <book.pdf> <exam.pdf> [-n 10] [--pdf]  # deneme sınavı
 #   --lang English --depth derin -e analoji -e soru -e sözlük
 #   depth: özet | standart | derin · extras also accepted by `preview`
 dersnotu serve    [-p 8000] [--reload]          # web UI + API
@@ -38,7 +39,7 @@ dersnotu serve    [-p 8000] [--reload]          # web UI + API
 `render` with no argument prints a built-in sample document — that is the way to
 exercise the whole Markdown → HTML → KaTeX → PDF chain without an API key.
 
-**Only `build` calls a model.** Everything else runs offline — use `preview` and
+**Only `build` and `practice` call a model.** Everything else runs offline — use `preview` and
 `estimate` to validate request construction and cost before spending money.
 `--sections N` limits a real run to the first N sections — **CLI only, and
 deliberately not exposed on the web.** A truncated document is not a summary:
@@ -62,6 +63,10 @@ place that decides.
 `auto` resolves api → cli → demo, so the app always starts.
 
 ## Architecture
+
+Two producers share the same front half. `pipeline.run()` writes a study note;
+`practice.generate()` writes a practice exam from a past paper (see *Practice
+exams* below). Both parse the lecture, load the book index and build topic cards.
 
 Pipeline: `pipeline.run()` orchestrates six stages, each independently testable.
 
@@ -271,7 +276,10 @@ that, because silently eating a block would lose content.
 **`text-transform: uppercase` is locale-sensitive.** The page is `lang="tr"`, so
 uppercasing the English word "Figure" yields "FİGURE" (dotted capital I) and
 mangles the book's own label. Anything quoted from an English source needs
-`lang="en"`, or no transform at all.
+`lang="en"`, or no transform at all. **This recurs through `.lab`**, whose whole
+job is uppercase mono labels: reusing it for a line that interpolates a
+*filename* turned `Lecture02 - Bitsints.pptx` into `LECTURE02 - BİTSİNTS.PPTX`.
+`.lab` is for fixed Turkish labels only — user data gets `.secim`/`.sub`.
 
 **KaTeX fonts must be embedded, not linked.** `_katex_css()` inlines the 20
 woff2 faces as `data:` URIs. Absolute `file://` paths work when Chromium opens
@@ -387,6 +395,13 @@ only works while the server has been up since the run. The real scenario —
 generation died, browser closed, machine slept — is served from the library:
 sources are materials, topic cards are in `.doc.json`.
 
+**Both output kinds live in one table.** `documents.kind` is `note` or
+`practice`; they share a lifecycle (generate → read → download → delete) and one
+search index, so splitting the table would duplicate every query. They part ways
+in exactly two places: what `sections` counts, and the duration calibration
+filter above. The course page shows them in one list with a badge on the
+practice rows — the exception is what gets marked, not the norm.
+
 **Schema changes need a migration, not a bump.** `CREATE TABLE IF NOT EXISTS`
 adds no columns to an existing table, so a shipped library keeps the old shape
 and the first query dies with `no such column`. `SCHEMA_VERSION` +`_migrate()`
@@ -437,10 +452,54 @@ is capped at `EXAM_CHAR_LIMIT` — an uncapped question archive would triple the
 prefix. `retry_failed` must rebuild the prefix *with* the exam, or a retried
 section comes out framed differently from its siblings.
 
+### Practice exams (`practice.py`, `render/exam.py`)
+
+The exam paper's **second** use. In study notes it shifts depth; here the paper
+itself is a **template**: question types, length, points and difficulty come
+from it, the questions are rebuilt. Same three-source split as everywhere else —
+**paper = form, slides = scope, book = truth** — and letting the paper decide
+scope would drill the student on material they are not responsible for.
+
+**`modeled_on` is the whole discipline.** The model must quote the past question
+it modelled a new one on, verbatim, or leave the field empty. Empty is allowed;
+inventing is not. `render/exam.py` prints the "örnek alınan soru" block only
+when the quote exists, so an unsupported "this came up in the exam" claim has no
+way to reach the page. This is the citation rule applied to a third source.
+
+**One call for the whole paper, not one per section.** Sections were the natural
+unit for notes (independent texts, one can fail without killing the rest); a
+paper has to be *balanced*. Per-section calls would ask the same thing twice,
+miss the point total and lose the difficulty spread — none of which is visible
+unless all questions are in view at once. Cheaper too: one call, not eight.
+TOC alignment is skipped for the same kind of reason — it buys retrieval
+precision the paper does not need, at the price of a second call.
+
+**`CHUNKS_PER_SECTION = 2`, not `chunks_per_section = 6`.** Every section's
+excerpts go into a single request; the notes figure would mean 48 chunks ≈ 35K
+tokens. Framing a question needs the definition, not the chapter.
+
+**`section_seconds` must be filtered by `kind`.** A practice run stores
+`sections = len(questions)`, so an unfiltered query reads "12 questions / 40 s"
+as "3 s per section" and wrecks the *study-note* duration estimate.
+`test_practice_runs_do_not_pollute_the_note_estimate` locks it. Anything else
+that learns from `documents` has the same obligation.
+
+**Structured output means no streaming.** `complete_json` returns the whole
+paper at once, so `section:delta` never fires and the live output panel would
+sit empty. The web UI says so instead of pretending to stream.
+
+**The cover must name the paper, not its blob.** Materials are content-addressed,
+so `exam_path` is `.cache/materials/7667c6af….pdf`. `PracticeInputs.exam_name`
+carries the display name; without it the cover tells the user nothing about
+which paper it copied the shape of.
+
 **`FakeLLMClient` (`llm/fake.py`) runs the whole pipeline with no API key** —
 demo checkbox in the UI, `demo=true` on the API. It composes its output from
 *real* slide titles and *real* retrieved book chunks, so a retrieval regression
-shows up in demo output too. Use it for any orchestration work.
+shows up in demo output too. Use it for any orchestration work. It answers the
+practice schema the same way, and it obeys the same rule the real prompt does:
+if the paper has no quotable question, `modeled_on` comes back **empty** rather
+than invented — otherwise the demo would teach the wrong contract.
 
 ## Conventions
 

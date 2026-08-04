@@ -430,6 +430,96 @@ def retry(
 
 # ---------------------------------------------------------------------------
 @app.command()
+def practice(
+    lecture: Path = typer.Argument(..., exists=True, help="Ders slaytı PDF'i"),
+    book: Path = typer.Argument(..., exists=True, help="Ders kitabı PDF'i"),
+    exam: Path = typer.Argument(..., exists=True, help="Geçmiş sınav kâğıdı PDF'i"),
+    out: Path = typer.Option(None, "--out", "-o", help="Çıktı .md yolu"),
+    language: str = typer.Option("Türkçe", "--lang", "-l"),
+    count: int = typer.Option(
+        0, "--count", "-n", help="Soru sayısı (0 = geçmiş kâğıtta kaç soru varsa)"
+    ),
+    backend: str = typer.Option("auto", "--backend", "-b"),
+    pdf: bool = typer.Option(False, "--pdf", help="Markdown yanında PDF de bas"),
+) -> None:
+    """Geçmiş sınava benzer yeni sorulardan bir deneme sınavı üret.
+
+    Kâğıt BİÇİMİ verir, slaytlar KAPSAMI, kitap DOĞRULUĞU. Sorular kopyalanmaz;
+    örnek alınan geçmiş soru cevap anahtarında birebir alıntılanır.
+    """
+    from .llm import BACKENDS, resolve_backend
+    from .practice import PracticeError, PracticeInputs
+    from .practice import generate as uret
+    from .practice import to_markdown as sinav_markdown
+
+    if backend not in BACKENDS:
+        console.print(f"[red]Geçersiz --backend:[/red] {backend} · {', '.join(BACKENDS)}")
+        raise typer.Exit(code=1)
+
+    chosen = resolve_backend(backend)
+    if chosen == "demo" and backend == "auto":
+        console.print(
+            "[red]Hiçbir kimlik bulunamadı.[/red] --backend demo ile deneyebilirsin."
+        )
+        raise typer.Exit(code=1)
+    console.print(f"[dim]arka uç: [bold]{chosen}[/bold][/dim]")
+
+    def progress(event: str, detail: str = "") -> None:
+        color = {"questions:start": "cyan", "questions:done": "green"}.get(event, "dim")
+        console.print(f"[{color}]{event}[/{color}] {detail}")
+
+    try:
+        sinav = uret(
+            PracticeInputs(
+                lecture_path=lecture, book_path=book, exam_path=exam,
+                language=language, count=count, backend=chosen,
+            ),
+            settings,
+            progress=progress,
+        )
+    except PracticeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    out = out or settings.out_dir / f"{lecture.stem}-deneme.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(sinav_markdown(sinav), encoding="utf-8")
+
+    from .practice import save_debug as sinav_debug
+
+    sinav_debug(sinav, out.with_suffix(".json"))
+
+    dayanakli = len(sinav.grounded)
+    console.print(
+        f"\n[bold green]Yazıldı:[/bold green] {out}\n"
+        f"{len(sinav.questions)} soru · {sinav.total_points} puan · "
+        f"{sinav.duration_minutes or '?'} dakika\n"
+        f"[dim]{dayanakli}/{len(sinav.questions)} soru geçmiş kâğıttaki bir "
+        "soruya dayanıyor (alıntısı cevap anahtarında).[/dim]"
+    )
+    # Kâğıda dayanmayan soru bir hata değil ama kullanıcının bilmesi gereken
+    # bir şey: o sorular kapsamdan üretilmiş, "benzer" iddiası taşımıyor.
+    if dayanakli < len(sinav.questions):
+        console.print(
+            f"[yellow]{len(sinav.questions) - dayanakli} soru geçmiş kâğıttaki "
+            "bir soruya bağlanamadı[/yellow] — kapsamdan üretildiler."
+        )
+
+    if pdf:
+        from .render import RenderError, render_practice
+
+        hedef = out.with_suffix(".pdf")
+        try:
+            with console.status("Chromium ile basılıyor…"):
+                render_practice(sinav, hedef)
+        except RenderError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+        console.print(f"[green]PDF yazıldı:[/green] {hedef}")
+
+
+# ---------------------------------------------------------------------------
+@app.command()
 def build(
     lecture: Path = typer.Argument(..., exists=True),
     book: Path = typer.Argument(..., exists=True),

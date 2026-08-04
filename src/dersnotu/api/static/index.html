@@ -113,7 +113,10 @@ function cardHTML(c){
     ? "henüz dosya yok"
     : [n.lectures && `<b>${n.lectures}</b> slayt`,
        n.books && `<b>${n.books}</b> kitap`,
-       n.documents && `<b>${n.documents}</b> ders notu`].filter(Boolean).join(" · ");
+       n.notes && `<b>${n.notes}</b> ders notu`,
+       // Yalnızca varsa görünür: hiç deneme üretmemiş bir derste "0 deneme"
+       // yazmak kartı boş bir sayıyla doldurmak olurdu.
+       n.practices && `<b>${n.practices}</b> deneme`].filter(Boolean).join(" · ");
   return `<a class="card" href="/ders/${c.id}">
     <button class="x" type="button" data-del="${c.id}" data-name="${esc(c.name)}"
             title="Dersi sil" aria-label="Dersi sil">×</button>

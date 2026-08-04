@@ -283,7 +283,9 @@ def test_course_detail_splits_materials_by_kind(client):
     d = client.get(f"/api/courses/{c['id']}").json()
     assert [m["id"] for m in d["lectures"]] == [lec["id"]]
     assert [m["id"] for m in d["books"]] == [book["id"]]
-    assert d["counts"] == {"lectures": 1, "books": 1, "documents": 0}
+    assert d["counts"] == {
+        "lectures": 1, "books": 1, "documents": 0, "notes": 0, "practices": 0
+    }
     # Kitap indeks durumu seçim ekranında gösteriliyor; alan hep bulunmalı.
     assert d["books"][0]["indexed"] is False
     assert "indexed" not in d["lectures"][0]
@@ -582,3 +584,103 @@ def test_full_demo_run_produces_downloadable_pdf(client):
     assert md.status_code == 200
     # Retrieval gerçekten çalıştıysa çıktıda kitap atıfı olmalı.
     assert "[K:" in md.text
+
+
+# --- deneme sınavı ---------------------------------------------------------
+def test_practice_requires_a_past_exam(client):
+    """Ders notunda kâğıt isteğe bağlıydı; burada ŞABLON o, zorunlu."""
+    c = _course(client)
+    lec = _material(client, c["id"], "lecture", "slayt.pdf")
+    book = _material(client, c["id"], "book", "kitap.pdf")
+    r = client.post("/api/practice", data={
+        "course_id": c["id"], "lecture_id": lec["id"], "book_id": book["id"],
+    })
+    assert r.status_code == 422  # exam_id eksik
+
+
+def test_practice_rejects_a_material_of_the_wrong_kind(client):
+    c = _course(client)
+    lec = _material(client, c["id"], "lecture", "slayt.pdf")
+    book = _material(client, c["id"], "book", "kitap.pdf")
+    r = client.post("/api/practice", data={
+        "course_id": c["id"], "lecture_id": lec["id"], "book_id": book["id"],
+        "exam_id": lec["id"],  # slayt, sınav değil
+    })
+    assert r.status_code == 400
+    assert "exam" in r.json()["detail"]
+
+
+def test_practice_rejects_an_absurd_question_count(client):
+    c = _course(client)
+    lec = _material(client, c["id"], "lecture", "slayt.pdf")
+    book = _material(client, c["id"], "book", "kitap.pdf")
+    exam = _material(client, c["id"], "exam", "vize.pdf")
+    r = client.post("/api/practice", data={
+        "course_id": c["id"], "lecture_id": lec["id"], "book_id": book["id"],
+        "exam_id": exam["id"], "count": 500,
+    })
+    assert r.status_code == 400
+    assert "Soru sayısı" in r.json()["detail"]
+
+
+@pytest.mark.skipif(not HAVE_PDFS, reason="örnek PDF'ler yok")
+@pytest.mark.slow
+def test_full_demo_practice_run_produces_a_paper_and_a_key(client, tmp_path):
+    """Uçtan uca: kâğıt oku → kapsam çıkar → alıntı topla → soru üret → bas.
+
+    Demo modunda koşuyor ama içerik GERÇEK kaynaklardan kuruluyor; bu yüzden
+    retrieval ya da sınav metni okuma bozulursa burada yakalanır.
+    """
+    from dersnotu.render.pdf import html_to_pdf
+
+    kagit = tmp_path / "vize.pdf"
+    html_to_pdf(
+        "<!doctype html><html lang='en'><body>"
+        "<p>1. What is the decimal value of the bit pattern 0x9C in 8 bits?</p>"
+        "<p>2. Which byte lies at address 0x102 on a little-endian machine?</p>"
+        "</body></html>",
+        kagit,
+    )
+
+    c = _course(client)
+    ids = {}
+    for kind, path in (("lecture", LECTURE), ("book", BOOK), ("exam", kagit)):
+        with path.open("rb") as f:
+            ids[kind] = client.post(
+                f"/api/courses/{c['id']}/materials", data={"kind": kind},
+                files={"file": (path.name, f, "application/pdf")},
+            ).json()["id"]
+
+    r = client.post("/api/practice", data={
+        "course_id": c["id"], "lecture_id": ids["lecture"], "book_id": ids["book"],
+        "exam_id": ids["exam"], "count": 3, "demo": "true",
+    })
+    assert r.status_code == 200, r.text
+    jid = r.json()["id"]
+    _wait(lambda: client.get(f"/api/jobs/{jid}").json()["status"] in ("done", "failed"),
+          timeout=240)
+
+    state = client.get(f"/api/jobs/{jid}").json()
+    assert state["status"] == "done", state["error"]
+    types = [e["type"] for e in state["events"]]
+    for beklenen in ("exam:loaded", "topics:done", "retrieve:done",
+                     "questions:done", "render:done"):
+        assert beklenen in types, types
+
+    # Kitaplığa deneme olarak yazılmış olmalı — ders notu sayımına karışmamalı.
+    ders = client.get(f"/api/courses/{c['id']}").json()
+    assert ders["counts"] == {"lectures": 1, "books": 1, "documents": 1,
+                              "notes": 0, "practices": 1}
+    belge = ders["documents"][0]
+    assert belge["kind"] == "practice"
+    assert belge["sections"] == 3
+
+    md = client.get(f"/api/documents/{belge['id']}/download?fmt=md").text
+    # Anahtar SONDA: çözüm soruların altında olsaydı kâğıt denemelik olmazdı.
+    assert md.index("Soru 3") < md.index("# Cevap anahtarı")
+    assert "[K:" in md  # kitap atıfı gerçekten geldi
+    assert "0x9C" in md  # geçmiş kâğıttan birebir alıntı
+
+    # Sorular aramaya girmiş olmalı, çıpası soru numarası.
+    hits = client.get(f"/api/courses/{c['id']}/search", params={"q": "tümleyen"}).json()
+    assert all(h["document_kind"] == "practice" for h in hits["hits"])

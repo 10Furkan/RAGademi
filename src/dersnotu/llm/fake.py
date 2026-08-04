@@ -23,6 +23,12 @@ _SLIDES_RE = re.compile(r"Slaytlar (\d+)-(\d+)")
 _CITE_RE = re.compile(r"### \[K: ([^\]]+)\]\n(.{0,400})", re.S)
 _SLIDE_TITLE_RE = re.compile(r"--- Slayt (\d+): ([^\n-]*) ---")
 _BOOK_FIG_RE = re.compile(r"^- `([\d.]+)` — (.*?) \(s\. (\d+)\)$", re.M)
+# Deneme sınavı isteği slaytları başka biçimde yazıyor (bölüm bloğu yok).
+_PRACTICE_SLIDE_RE = re.compile(r"^### Slayt (\d+): (.*)$", re.M)
+# Geçmiş kâğıttan alıntılanabilecek bir satır: soru işaretiyle biten ya da
+# numarayla başlayan. Bulunamazsa `modeled_on` BOŞ kalır — sahte istemci de
+# uydurma alıntı üretmez, kural her iki istemcide de aynı.
+_EXAM_LINE_RE = re.compile(r"^\s*(?:\d+[.)]\s*)?(.{25,180}\?)\s*$", re.M)
 
 
 class FakeLLMClient:
@@ -76,6 +82,8 @@ class FakeLLMClient:
 
         if "cards" in str(schema):
             return {"cards": self._fake_cards(joined)}
+        if "modeled_on" in str(schema):
+            return self._fake_exam(joined)
         return {"alignments": self._fake_alignments(joined)}
 
     # ------------------------------------------------------------------
@@ -98,6 +106,69 @@ class FakeLLMClient:
                 }
             )
         return cards
+
+    def _fake_exam(self, payload: str) -> dict:
+        """Sahte deneme sınavı.
+
+        Ders notu demosuyla aynı sözleşme: içerik GERÇEK kaynaklardan kurulur.
+        Sorular gerçek slayt başlıklarını, çözümler gerçek kitap künyelerini,
+        `modeled_on` ise geçmiş kâğıttan gerçekten alıntılanmış bir satırı
+        taşır — retrieval ya da sınav metni okuma bozulursa demo çıktısında da
+        görünür. Kâğıtta alıntılanacak satır yoksa alan BOŞ bırakılır; sahte
+        istemci de dayanaksız "sınavda çıkmıştı" iddiası üretmez.
+        """
+        basliklar = [
+            (n, t.strip()) for n, t in _PRACTICE_SLIDE_RE.findall(payload) if t.strip()
+        ]
+        cites = [c for c, _ in _CITE_RE.findall(payload)]
+        # Sınav metni "## BİÇİM" başlığından sonra; kapsam metnindeki soru
+        # cümlelerini yanlışlıkla alıntı sanmamak için oradan itibaren ara.
+        bas = payload.find("## BİÇİM")
+        kagit = payload[bas:] if bas >= 0 else ""
+        ornekler = _EXAM_LINE_RE.findall(kagit)
+
+        istenen = re.search(r"Tam olarak (\d+) soru", payload)
+        adet = int(istenen.group(1)) if istenen else 4
+        adet = max(1, min(adet, len(basliklar) or 1, 12))
+
+        sorular = []
+        for i in range(adet):
+            no, baslik = basliklar[i % len(basliklar)] if basliklar else ("?", "Konu")
+            kunye = cites[i % len(cites)] if cites else ""
+            coktan = i % 2 == 0
+            sorular.append({
+                "number": i + 1,
+                "kind": "çoktan seçmeli" if coktan else "hesaplama",
+                "points": 10,
+                "topic": baslik,
+                "slides": [int(no)] if str(no).isdigit() else [],
+                "prompt": (
+                    f"**Demo sorusu.** «{baslik}» konusundan, slayt {no} kapsamında: "
+                    "8 bitlik işaretli gösterimde $x = 0\\text{xCA}$ değeri "
+                    "hangi sayıya karşılık gelir?"
+                ),
+                "choices": ["$-54$", "$202$", "$-53$", "$54$"] if coktan else [],
+                "answer": "A" if coktan else "$-54$",
+                "solution": (
+                    "`0xCA` = `11001010`. En soldaki bit 1 olduğu için değer "
+                    "negatif: $-2^7 + 2^6 + 2^3 + 2^1 = -128 + 64 + 8 + 2 = -54$.\n\n"
+                    "Çeldirici `202` işaretsiz okumaktan, `-53` ise ikiye "
+                    "tümleyende bir eksik saymaktan gelir.\n\n"
+                    "```c\nsigned char x = 0xCA;   /* -54 */\n```"
+                ),
+                "citations": [kunye] if kunye else [],
+                "modeled_on": ornekler[i % len(ornekler)].strip() if ornekler else "",
+            })
+
+        return {
+            "profile": (
+                "Demo profili: kâğıt sahte istemci tarafından okundu, sorular "
+                "gerçek slayt başlıklarından ve gerçek kitap alıntılarından "
+                "kuruldu. Model çağrılmadı."
+            ),
+            "duration_minutes": 60,
+            "questions": sorular,
+        }
 
     def _fake_alignments(self, payload: str) -> list[dict]:
         out = []

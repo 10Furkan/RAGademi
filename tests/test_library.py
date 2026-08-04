@@ -32,7 +32,7 @@ def test_course_roundtrip(lib):
     assert lib.course(c.id).name == "Bilgisayar Sistemleri"
     assert [x.id for x in lib.courses()] == [c.id]
     assert lib.course(c.id).to_dict()["counts"] == {
-        "lectures": 0, "books": 0, "documents": 0
+        "lectures": 0, "books": 0, "documents": 0, "notes": 0, "practices": 0
     }
 
 
@@ -255,6 +255,9 @@ def test_v1_library_migrates_without_losing_data(tmp_path):
     # CHECK kalktı: sınav kâğıdı artık yüklenebiliyor
     src, sha = pdf(tmp_path, "v.pdf", b"%PDF-v")
     assert lib.add_material("c1", "exam", "vize.pdf", src, sha).kind == "exam"
+    # v3: göç öncesi yazılmış her satır ders notudur.
+    assert lib.document("d1").kind == "note"
+    assert lib.course("c1").to_dict()["counts"]["notes"] == 1
 
 
 def test_migration_is_idempotent(tmp_path):
@@ -341,6 +344,43 @@ def test_section_seconds_come_from_real_runs(lib):
     assert sorted(lib.section_seconds("cli")) == [100.0, 150.0]
     assert lib.section_seconds("api") == [10.0]
     assert lib.section_seconds("demo") == []
+
+
+def test_practice_runs_do_not_pollute_the_note_estimate(lib):
+    """Deneme sınavı TEK çağrıda üretiliyor ve `sections` orada SORU sayısını
+    tutuyor. Tür filtresi olmasaydı "12 soru / 40 sn" koşusu ders notu
+    tahmininde "bölüm başına 3 sn" diye okunur ve rakamı yerle bir ederdi."""
+    c = lib.create_course("Ders")
+    lib.add_document(course_id=c.id, title="Not", backend="api",
+                     duration=300.0, sections=6)               # 50 sn/bölüm
+    lib.add_document(course_id=c.id, title="Deneme", kind="practice",
+                     backend="api", duration=40.0, sections=12)  # 3.3 sn/soru
+
+    assert lib.section_seconds("api") == [50.0]
+    assert lib.section_seconds("api", kind="practice") == [pytest.approx(3.333, rel=1e-3)]
+
+
+def test_unknown_document_kind_is_rejected(lib):
+    c = lib.create_course("Ders")
+    with pytest.raises(ValueError):
+        lib.add_document(course_id=c.id, title="X", kind="sinav")
+
+
+def test_search_hit_carries_the_document_kind(lib):
+    """Okuyucudaki çıpa adı türe göre değişiyor (`#bolum-N` / `#soru-N`);
+    arayüz onu bu alandan seçiyor."""
+    c = lib.create_course("Ders")
+    d = lib.add_document(course_id=c.id, title="Deneme", kind="practice")
+    lib.index_document(d.id, c.id, [(3, "Soru 3", "İkinin tümleyeni sorusu")])
+    assert lib.search(c.id, "tümleyeni")[0].document_kind == "practice"
+
+
+def test_course_counts_split_notes_from_practice_papers(lib):
+    c = lib.create_course("Ders")
+    lib.add_document(course_id=c.id, title="A")
+    lib.add_document(course_id=c.id, title="B", kind="practice")
+    n = lib.course(c.id).to_dict()["counts"]
+    assert (n["documents"], n["notes"], n["practices"]) == (2, 1, 1)
 
 
 def test_missing_output_file_is_reported_not_hidden(lib, tmp_path):

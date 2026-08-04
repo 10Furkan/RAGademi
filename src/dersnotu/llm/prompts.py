@@ -198,6 +198,169 @@ bölümün sonunda tek satırla "sınavda geçmiş ama slaytta yok" diye not dü
 """
 
 
+# --- Deneme sınavı ---------------------------------------------------------
+# Geçmiş sınav kâğıdının İKİNCİ kullanımı. `EXAM_RULE` ders notunda derinliği
+# kaydırıyor; burada kâğıdın kendisi bir ŞABLON.
+#
+# Üç kaynağın işi burada da ayrı ve karıştırılmamalı:
+#   geçmiş sınav → BİÇİM (soru tipi, uzunluk, puan, zorluk)
+#   slaytlar     → KAPSAM (neyden sorumlusun)
+#   kitap        → DOĞRULUK (çözümdeki her iddianın kaynağı)
+# Kâğıdın kapsamı belirlemesine izin vermek, öğrenciye sorumlu olmadığı
+# konudan soru çözdürmek demek olurdu.
+PRACTICE_SYSTEM = """\
+Bir üniversite dersi için DENEME SINAVI hazırlıyorsun. Öğrenci sana bu dersin \
+geçmiş sınav kâğıdını, ders slaytlarını ve ders kitabından alıntıları verdi.
+
+ÜÇ KAYNAK, ÜÇ AYRI İŞ — karıştırma:
+1. GEÇMİŞ SINAV KÂĞIDI → BİÇİMİ verir. Soru tipleri, soru uzunluğu, puan \
+dağılımı, zorluk seviyesi, hangi beceriyi ölçtüğü. Kapsamı BELİRLEMEZ.
+2. DERS SLAYTLARI → KAPSAMI verir. Sadece slaytta işlenmiş konulardan sor.
+3. KİTAP ALINTILARI → DOĞRULUĞU verir. Çözümdeki bilgi buradan gelir.
+
+KOPYALAMA YASAK — bu görevin özü
+- Geçmiş sınav sorusunu olduğu gibi sorma. Aynı BECERİYİ ölçen YENİ bir soru \
+kur: sayılar, adresler, kod, dizgeler, bit genişlikleri farklı olsun.
+- Öğrenci geçmiş kâğıdı zaten okuyabilir. Senin işin onu ezberletmek değil, \
+aynı türden yeni bir soruyla sınamak.
+
+DAYANAK — bu kuralı ihlal etme
+- Her soru için `modeled_on` alanına, örnek aldığın geçmiş sınav sorusunu \
+BİREBİR yaz. Kâğıtta öyle bir soru yoksa alanı BOŞ bırak.
+- Boş bırakmak serbesttir, uydurmak değildir. "Bu tarz sınavda çıkmıştı" \
+diyip alıntılayamamak, kaynaksız bir cümle yazmakla aynı şeydir.
+- `slides` alanına sorunun dayandığı slayt numaralarını yaz — kapsam kanıtı.
+- `citations` alanına çözümü destekleyen kitap atıflarını `<bölüm>, s. <sayfa>` \
+biçiminde yaz; alıntıların başında sana verilen künyeyi birebir kullan.
+
+ÇÖZÜM
+- `answer` kısa ve kesin olsun (şık harfi, sayı, tek cümle).
+- `solution` adım adım olsun: öğrenci nerede takılacaksa orada yavaşla. \
+Sonucu verip geçme, ara adımı göster.
+- Çoktan seçmelide ÇELDİRİCİLER rastgele olmasın; her biri TİPİK BİR HATADAN \
+türesin (işaret uzatmayı unutmak, taşmayı gözden kaçırmak, bayt/bit karışması). \
+`solution` içinde hangi çeldiricinin hangi hataya karşılık geldiğini söyle.
+
+BİÇİM
+- Markdown. Matematik LaTeX: satır içi `$...$`, blok `$$...$$`. Unicode alt/üst \
+simge KULLANMA (₀¹²) — `$x_1$`, `$2^{w-1}$` yaz.
+- Kod bloklarında dil etiketi kullan (```c, ```asm).
+- `choices` yalnızca çoktan seçmeli sorularda dolu olsun; şık harflerini \
+(A), B)) yazma, sistem numaralandırıyor.
+- Zorluğu ve puanları geçmiş kâğıdın dağılımına benzet.
+"""
+
+PRACTICE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "profile": {"type": "string"},
+        "duration_minutes": {"type": "integer"},
+        "questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "number": {"type": "integer"},
+                    "kind": {"type": "string"},
+                    "points": {"type": "integer"},
+                    "topic": {"type": "string"},
+                    "slides": {"type": "array", "items": {"type": "integer"}},
+                    "prompt": {"type": "string"},
+                    "choices": {"type": "array", "items": {"type": "string"}},
+                    "answer": {"type": "string"},
+                    "solution": {"type": "string"},
+                    "citations": {"type": "array", "items": {"type": "string"}},
+                    "modeled_on": {"type": "string"},
+                },
+                "required": [
+                    "number", "kind", "points", "topic", "slides", "prompt",
+                    "choices", "answer", "solution", "citations", "modeled_on",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["profile", "duration_minutes", "questions"],
+    "additionalProperties": False,
+}
+
+
+def build_practice_request(
+    lecture,
+    exam_text: str,
+    chunks,
+    language: str,
+    *,
+    count: int = 0,
+) -> str:
+    """Deneme sınavı isteğinin gövdesi.
+
+    `count == 0` "geçmiş kâğıtta kaç soru varsa o kadar" demek. Sabit bir sayı
+    dayatmak kâğıdın biçimini taklit etme işine ters düşerdi: 4 soruluk bir
+    finalin denemesi 20 soruyla yapılmaz.
+    """
+    parts = [
+        f"# DERS: {lecture.title}",
+        f"{len(lecture.slides)} slayt, {len(lecture.sections)} bölüm.",
+        "",
+        "## KAPSAM — ders slaytları",
+        "(Yalnızca burada işlenen konulardan soru sor.)",
+        "",
+    ]
+    for s in lecture.slides:
+        if s.is_divider:
+            continue
+        parts.append(f"### Slayt {s.number}: {s.title}")
+        if s.text:
+            parts.append(s.text)
+        parts.append("")
+
+    parts += [
+        "## BİÇİM — geçmiş sınav kâğıdı",
+        "(Soru tipini, uzunluğu, puanlamayı ve zorluğu buradan al. "
+        "Soruları KOPYALAMA; örnek aldığın soruyu `modeled_on` alanına yaz.)",
+        "",
+        exam_text or "(Sınav metni okunamadı.)",
+        "",
+    ]
+
+    if chunks:
+        parts += [
+            "## DOĞRULUK — kitap alıntıları",
+            "(Çözümlerdeki bilgi buradan gelsin; künyeyi `citations` alanına yaz.)",
+            "",
+        ]
+        for c in chunks:
+            parts += [f"### [K: {c.citation}]", c.text, ""]
+    else:
+        parts += [
+            "## DOĞRULUK — kitap alıntıları",
+            "(Eşleşen alıntı bulunamadı. Yalnızca slayta dayan; emin olmadığın "
+            "bir çözümü yazmaktansa o soruyu hiç sorma.)",
+            "",
+        ]
+
+    adet = (
+        "Geçmiş kâğıtta kaç soru varsa o kadar soru üret (en az 4, en çok 25)."
+        if count <= 0
+        else f"Tam olarak {count} soru üret."
+    )
+    parts += [
+        "---",
+        "## Görev",
+        adet,
+        f"Soruları ve çözümleri {language} dilinde yaz. Teknik terimler ilk "
+        "geçtiklerinde parantez içinde İngilizcesiyle verilir (kitap ve sınav "
+        "İngilizce).",
+        "`profile` alanına geçmiş kâğıtta gözlemlediğin biçimi bir iki cümleyle "
+        "yaz: kaç soru, hangi tipler, ne ölçülüyor. Bu, senin neye benzettiğinin "
+        "denetlenebilmesi için.",
+        "`duration_minutes` alanına kâğıtta yazan süreyi koy; yazmıyorsa "
+        "soruların ağırlığına göre makul bir süre tahmin et.",
+    ]
+    return "\n".join(parts)
+
+
 def build_lecture_context(
     lecture, alignment_note: str = "", exam_text: str = ""
 ) -> str:
