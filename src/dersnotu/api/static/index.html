@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dersnotu — slayttan ders notuna</title>
+<style>
+:root{
+  --paper:#F2F3F0; --ink:#161A22; --muted:#5C6370; --rule:#D8DAD3;
+  --marker:#D9F04B; --surface:#FFFFFF; --danger:#C4574C; --ok:#3E7A4E;
+  --mono:"Cascadia Mono",Consolas,ui-monospace,monospace;
+  --serif:"Literata",Georgia,Cambria,serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --paper:#14161A; --ink:#E7E9E4; --muted:#9AA0A8; --rule:#2A2E35;
+         --surface:#1B1E24; --marker:#C8E23F; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--serif);
+     line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1220px;margin:0 auto;padding:0 24px}
+
+/* ---- başlık ---- */
+header{padding:56px 0 28px;border-bottom:2px solid var(--ink)}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;
+         text-transform:uppercase;color:var(--muted);margin-bottom:14px}
+h1{font-size:clamp(30px,4.6vw,50px);line-height:1.08;margin:0 0 12px;
+   letter-spacing:-.02em;font-weight:600;max-width:19ch}
+h1 .hl{background:linear-gradient(transparent 58%,var(--marker) 58%);padding:0 .06em}
+.lede{color:var(--muted);max-width:56ch;margin:0;font-size:15px}
+
+/* ---- form ---- */
+form{display:grid;grid-template-columns:1fr 1fr auto auto;gap:12px;
+     align-items:end;margin:28px 0 0}
+label{display:block}
+.lab{font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+     text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.drop{border:1.5px dashed var(--rule);background:var(--surface);border-radius:4px;
+      padding:14px;cursor:pointer;transition:border-color .15s,background .15s;
+      font-size:13px;color:var(--muted);min-height:56px;display:flex;align-items:center}
+.drop:hover,.drop.over{border-color:var(--ink)}
+.drop.has{border-style:solid;border-color:var(--ink);color:var(--ink)}
+.drop input{display:none}
+.drop .name{font-family:var(--mono);font-size:11.5px;word-break:break-all}
+select{font-family:var(--serif);font-size:14px;padding:15px 12px;border-radius:4px;
+       border:1.5px solid var(--rule);background:var(--surface);color:var(--ink)}
+button{font-family:var(--serif);font-size:15px;font-weight:600;padding:15px 24px;
+       border:none;border-radius:4px;background:var(--ink);color:var(--paper);
+       cursor:pointer;white-space:nowrap}
+button:disabled{opacity:.4;cursor:not-allowed}
+.opts{grid-column:1/-1;display:flex;gap:20px;align-items:center;
+      font-size:12.5px;color:var(--muted);margin-top:-2px}
+.opts label{display:flex;gap:7px;align-items:center;cursor:pointer}
+
+/* ---- anlatım modları ----
+   Dosyalar "ne", bu bant "nasıl". Ayrı satıra alındı çünkü farklı bir soru.
+   Derinlik tekli seçim → segment; ek anlatım çoklu → chip. Kontrol biçimi
+   seçimin doğasını söylemeli, hepsi checkbox olmamalı. */
+.modes{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:14px 30px;
+       border-top:1px solid var(--rule);padding-top:16px;margin-top:6px}
+/* .lab bir <span>; .seg inline-flex olduğu için aynı satır kutusuna
+   düşüyordu, .chips ise block-flex olduğu için alta iniyordu. */
+.modes .lab{display:block;margin-bottom:8px}
+.modes input{appearance:none;position:absolute;width:0;height:0;opacity:0;margin:0}
+.modes label{display:inline-block;cursor:pointer}
+
+.seg{display:inline-flex;border:1.5px solid var(--rule);border-radius:4px;overflow:hidden}
+.seg span{display:block;padding:7px 15px;font-size:13px;color:var(--muted);
+          border-right:1px solid var(--rule);transition:background .15s,color .15s}
+.seg label:last-child span{border-right:none}
+.seg input:checked+span{background:var(--ink);color:var(--paper)}
+.seg input:focus-visible+span{outline:2px solid var(--marker);outline-offset:-3px}
+/* Kullanılamayan kimlik yolu: tıklanabilir görünmesin. */
+.modes label.off{cursor:not-allowed}
+.modes label.off span{opacity:.4;text-decoration:line-through}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips span{display:block;padding:6px 14px;font-size:13px;color:var(--muted);
+            border:1.5px solid var(--rule);border-radius:20px;
+            transition:border-color .15s,color .15s,background .15s}
+.chips input:checked+span{border-color:var(--ink);color:var(--ink);
+            background:linear-gradient(transparent 46%,var(--marker) 46%)}
+.chips input:focus-visible+span{outline:2px solid var(--marker);outline-offset:2px}
+
+@media (prefers-reduced-motion:reduce){.seg span,.chips span{transition:none}}
+
+/* Fosforlu kalem koyu temada ters çalışıyor: bant metnin ALT yarısını
+   kaplıyor, metin ise açık renk. Açık metin + parlak sarı = okunmaz. Koyu
+   temada bandı tam yükseklikte, düşük opaklıklı bir tinte çeviriyoruz —
+   jest aynı kalıyor, kontrast geri geliyor. Bu kural tanımlardan SONRA
+   gelmeli, yoksa eşit özgüllükte kaybeder. */
+@media (prefers-color-scheme:dark){
+  h1 .hl{background:color-mix(in srgb,var(--marker) 26%,transparent);
+         box-shadow:inset 0 -2px 0 var(--marker)}
+  .chips input:checked+span{background:color-mix(in srgb,var(--marker) 20%,transparent);
+         border-color:var(--marker)}
+}
+
+/* ---- ana bölüm ---- */
+main{display:grid;grid-template-columns:270px 1fr;gap:36px;padding:32px 0 80px}
+@media(max-width:860px){main{grid-template-columns:1fr}form{grid-template-columns:1fr}}
+
+/* ilerleme rayı */
+.rail{position:sticky;top:24px;align-self:start}
+.rail h2{font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+         text-transform:uppercase;color:var(--muted);margin:0 0 14px;font-weight:400}
+.step{display:flex;gap:11px;padding:7px 0;font-size:13px;color:var(--muted);
+      border-left:2px solid var(--rule);padding-left:14px;margin-left:3px}
+.step.active{color:var(--ink);border-left-color:var(--marker);font-weight:600}
+.step.done{color:var(--ink);border-left-color:var(--ink)}
+.step .tick{font-family:var(--mono);font-size:11px;opacity:.7;min-width:14px}
+.step .detail{font-family:var(--mono);font-size:10.5px;color:var(--muted);
+              display:block;font-weight:400;margin-top:2px}
+.meta{margin-top:22px;padding-top:16px;border-top:1px solid var(--rule);
+      font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.8}
+.meta b{color:var(--ink);font-weight:600}
+.dl{display:block;margin-top:16px;text-align:center;padding:12px;
+    background:var(--marker);color:#161A22;border-radius:4px;text-decoration:none;
+    font-family:var(--serif);font-weight:600;font-size:14px}
+
+/* çıktı */
+.out{min-width:0;background:var(--surface);border:1px solid var(--rule);
+     border-radius:5px;padding:34px 38px;min-height:340px}
+.out.empty{display:flex;align-items:center;justify-content:center;
+           color:var(--muted);font-size:14px;text-align:center;border-style:dashed}
+.sec{padding-bottom:22px;margin-bottom:22px;border-bottom:1px solid var(--rule)}
+.sec:last-child{border-bottom:none;margin-bottom:0}
+.sec h3{font-size:19px;margin:0 0 4px;font-weight:600;letter-spacing:-.01em}
+.sec .tag{font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+          text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+.sec pre{white-space:pre-wrap;word-break:break-word;font-family:var(--serif);
+         font-size:14.5px;margin:0;line-height:1.62}
+.sec.writing .tag::after{content:"▍";animation:blink 1s steps(2) infinite;
+                         color:var(--marker);margin-left:4px}
+@keyframes blink{50%{opacity:0}}
+.err{border:1px dashed var(--danger);background:color-mix(in srgb,var(--danger) 8%,transparent);
+     padding:14px 16px;border-radius:4px;color:var(--danger);font-size:13.5px;margin-bottom:18px}
+.badge{display:inline-block;font-family:var(--mono);font-size:10px;padding:2px 7px;
+       border-radius:3px;background:var(--marker);color:#161A22;letter-spacing:.08em}
+
+/* Eksik bölüm uyarısı: uyarı rengi değil, EYLEM rengi. Kullanıcının burada
+   yapacağı bir şey var; kırmızı bir hata kutusu onu çaresiz gösterirdi. */
+.retry{margin-top:14px;padding:12px 13px;border:1px solid var(--rule);
+       border-left:3px solid var(--danger);border-radius:4px;background:var(--surface)}
+.retry .why{margin:0 0 10px;font-size:12.5px;color:var(--muted);line-height:1.5}
+.retry button{width:100%;font-size:13.5px;padding:9px 12px;
+              background:var(--ink);color:var(--paper)}
+.retry button:disabled{opacity:.45}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">dersnotu</div>
+    <h1>Slaytlar üç madde. Kitap bin sayfa. <span class="hl">Arası boş.</span></h1>
+    <p class="lede">Ders slaytını ve kitabı yükle. Sistem slaytın kapsamını korur,
+       açıklamayı kitaptan çeker ve her iddiaya kaynak koyar.</p>
+
+    <form id="f">
+      <label>
+        <span class="lab">Ders slaytı (PDF)</span>
+        <div class="drop" id="d-lecture">
+          <input type="file" name="lecture" accept="application/pdf" required>
+          <span class="name">Dosya seç veya sürükle</span>
+        </div>
+      </label>
+      <label>
+        <span class="lab">Ders kitabı (PDF)</span>
+        <div class="drop" id="d-book">
+          <input type="file" name="book" accept="application/pdf" required>
+          <span class="name">Dosya seç veya sürükle</span>
+        </div>
+      </label>
+      <label>
+        <span class="lab">Dil</span>
+        <select name="language">
+          <option>Türkçe</option><option>English</option><option>Deutsch</option>
+        </select>
+      </label>
+      <button type="submit" id="go">Ders notu oluştur</button>
+
+      <div class="modes">
+        <div>
+          <span class="lab">Kimlik</span>
+          <div class="seg" id="backends">
+            <label><input type="radio" name="backend" value="api"><span>API anahtarı</span></label>
+            <label><input type="radio" name="backend" value="cli"><span>Claude Pro</span></label>
+            <label><input type="radio" name="backend" value="demo" checked><span>Demo</span></label>
+          </div>
+        </div>
+        <div>
+          <span class="lab">Derinlik</span>
+          <div class="seg">
+            <label><input type="radio" name="depth" value="özet"><span>Özet</span></label>
+            <label><input type="radio" name="depth" value="standart" checked><span>Standart</span></label>
+            <label><input type="radio" name="depth" value="derin"><span>Derin</span></label>
+          </div>
+        </div>
+        <div>
+          <span class="lab">Ek anlatım</span>
+          <div class="chips">
+            <label><input type="checkbox" name="extras" value="analoji"><span>Analoji</span></label>
+            <label><input type="checkbox" name="extras" value="örnek"><span>Ek örnek</span></label>
+            <label><input type="checkbox" name="extras" value="soru"><span>Kendini sına</span></label>
+            <label><input type="checkbox" name="extras" value="sözlük"><span>Sözlük</span></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="opts">
+        <label>İlk <input type="number" name="sections" value="0" min="0" max="40"
+               style="width:52px;font-family:var(--mono);padding:3px 5px;border:1px solid var(--rule);
+                      background:var(--surface);color:var(--ink);border-radius:3px"> bölüm (0 = hepsi)</label>
+        <span id="cred"></span>
+      </div>
+    </form>
+  </header>
+
+  <main>
+    <aside class="rail">
+      <h2>İlerleme</h2>
+      <div id="steps"></div>
+      <div class="meta" id="meta" hidden></div>
+      <a class="dl" id="dl" hidden>PDF indir</a>
+      <div class="retry" id="retrybox" hidden>
+        <p class="why" id="retrywhy"></p>
+        <button type="button" id="retry">Eksik bölümleri tamamla</button>
+      </div>
+    </aside>
+    <section class="out empty" id="out">
+      Ders notu burada, bölüm bölüm yazılırken görünecek.
+    </section>
+  </main>
+</div>
+
+<script>
+const STEPS = [
+  ["lecture",  "Slaytlar ayrıştırılıyor"],
+  ["book",     "Kitap indeksleniyor"],
+  ["topics",   "Konu kartları çıkarılıyor"],
+  ["align",    "Kitapla eşleştiriliyor"],
+  ["section",  "Bölümler yazılıyor"],
+  ["render",   "PDF basılıyor"],
+];
+const $ = s => document.querySelector(s);
+const stepsEl = $("#steps"), outEl = $("#out"), metaEl = $("#meta"), dlEl = $("#dl");
+let sections = {};
+
+function drawSteps(state){
+  stepsEl.innerHTML = STEPS.map(([k, label]) => {
+    const st = state[k] || {};
+    const cls = st.done ? "done" : st.active ? "active" : "";
+    const tick = st.done ? "✓" : st.active ? "▸" : "·";
+    return `<div class="step ${cls}"><span class="tick">${tick}</span>
+      <span>${label}${st.detail ? `<span class="detail">${st.detail}</span>` : ""}</span></div>`;
+  }).join("");
+}
+const state = {};
+drawSteps(state);
+
+// dosya seçici
+for (const id of ["d-lecture", "d-book"]) {
+  const box = $("#" + id), input = box.querySelector("input");
+  box.addEventListener("click", () => input.click());
+  box.addEventListener("dragover", e => { e.preventDefault(); box.classList.add("over"); });
+  box.addEventListener("dragleave", () => box.classList.remove("over"));
+  box.addEventListener("drop", e => {
+    e.preventDefault(); box.classList.remove("over");
+    input.files = e.dataTransfer.files; input.dispatchEvent(new Event("change"));
+  });
+  input.addEventListener("change", () => {
+    const f = input.files[0];
+    box.querySelector(".name").textContent = f ? f.name : "Dosya seç veya sürükle";
+    box.classList.toggle("has", !!f);
+  });
+}
+
+// Kullanılamayan kimlik yolları kapatılır ve sunucunun çözdüğü varsayılan
+// seçilir; kullanıcı elinde olmayan bir seçeneği tıklayıp hata almasın.
+fetch("/api/health").then(r => r.json()).then(h => {
+  const b = h.backends || {};
+  for (const key of ["api", "cli", "demo"]) {
+    const input = document.querySelector(`input[name="backend"][value="${key}"]`);
+    if (!input) continue;
+    const info = b[key] || { available: false };
+    input.disabled = !info.available;
+    const label = input.closest("label");
+    label.classList.toggle("off", !info.available);
+    label.title = info.available
+      ? info.label
+      : `${info.label} — kullanılamıyor`;
+  }
+  const resolved = b.resolved || "demo";
+  const pick = document.querySelector(`input[name="backend"][value="${resolved}"]`);
+  if (pick && !pick.disabled) pick.checked = true;
+
+  const notlar = {
+    api: `model: ${h.model}`,
+    cli: "Claude Pro aboneliği — token ücreti yok, kota harcanır",
+    demo: "API çağrısı yapılmaz",
+  };
+  $("#cred").innerHTML = resolved === "demo"
+    ? `<span class="badge">kimlik yok — demo modu</span>`
+    : `<span style="font-family:var(--mono);font-size:10.5px">${notlar[resolved]}</span>`;
+});
+
+function sectionEl(i){
+  if (sections[i]) return sections[i];
+  if (outEl.classList.contains("empty")) { outEl.classList.remove("empty"); outEl.innerHTML = ""; }
+  const el = document.createElement("div");
+  el.className = "sec writing";
+  el.innerHTML = `<div class="tag">Bölüm ${i + 1} yazılıyor</div><pre></pre>`;
+  outEl.appendChild(el);
+  sections[i] = el;
+  return el;
+}
+
+const btn = () => $("#go");
+function idle(label = "Ders notu oluştur"){
+  btn().disabled = false; btn().textContent = label;
+}
+
+// Bir işi baştan sona izler. Hem ilk üretim hem yeniden deneme aynı yoldan
+// geçsin diye ayrıldı; yeniden deneme de canlı akış ve ilerleme rayı görür.
+function follow(job){
+  const es = new EventSource(`/api/jobs/${job.id}/events`);
+  es.onmessage = ev => {
+    const d = JSON.parse(ev.data);
+    const [group] = d.type.split(":");
+
+    if (d.type === "section:delta") {
+      const el = sectionEl(d.index);
+      el.querySelector("pre").textContent += d.text;
+      el.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    if (d.type === "section:start") {
+      state.section = { active: true, detail: d.detail }; drawSteps(state); return;
+    }
+    if (d.type === "section:done") {
+      const m = /^B(\d+)/.exec(d.detail || "");
+      if (m) {
+        const el = sectionEl(+m[1]);
+        el.classList.remove("writing");
+        el.querySelector(".tag").textContent = d.detail.includes("HATA")
+          ? `Bölüm ${+m[1] + 1} — üretilemedi` : `Bölüm ${+m[1] + 1}`;
+      }
+      return;
+    }
+    if (["lecture", "book", "topics", "align", "render"].includes(group)) {
+      state[group] = { active: true, detail: d.detail || "" };
+      if (d.type.endsWith(":done") || d.type.endsWith(":cached")) {
+        state[group] = { done: true, detail: d.detail || "" };
+      }
+      drawSteps(state); return;
+    }
+    if (d.type === "job:done") {
+      Object.values(state).forEach(s => { s.done = true; s.active = false; });
+      state.render = { done: true, detail: "hazır" };
+      drawSteps(state);
+      const u = d.usage || {};
+      metaEl.hidden = false;
+      metaEl.innerHTML = `çağrı <b>${u.calls || 0}</b><br>
+        giriş <b>${(u.input_tokens || 0).toLocaleString("tr")}</b> token<br>
+        çıkış <b>${(u.output_tokens || 0).toLocaleString("tr")}</b> token<br>
+        cache okuma <b>${(u.cache_read_tokens || 0).toLocaleString("tr")}</b>`;
+      dlEl.hidden = false; dlEl.href = `/api/jobs/${job.id}/download`;
+      showRetry(d);
+      idle();
+    }
+    if (d.type === "job:failed") {
+      outEl.className = "out";
+      outEl.insertAdjacentHTML("afterbegin", `<div class="err">${d.error}</div>`);
+      idle();
+    }
+    if (d.type === "stream:end") es.close();
+  };
+  es.onerror = () => { es.close(); idle(); };
+}
+
+// --- Eksik bölümleri tamamlama ------------------------------------------
+let sonIs = null;
+
+function showRetry(d){
+  const box = $("#retrybox");
+  sonIs = d.can_retry ? d.id : null;
+  if (!d.can_retry) { box.hidden = true; return; }
+  const n = (d.failed_sections || []).length;
+  const hangi = (d.failed_sections || []).map(i => `Bölüm ${i + 1}`).join(", ");
+  $("#retrywhy").textContent =
+    `${n} bölüm üretilemedi (${hangi}). Yalnızca bunlar yeniden denenir; ` +
+    "başarılı bölümler yeniden üretilmez.";
+  $("#retry").disabled = false;
+  $("#retry").textContent = "Eksik bölümleri tamamla";
+  box.hidden = false;
+}
+
+$("#retry").addEventListener("click", async () => {
+  if (!sonIs) return;
+  const rb = $("#retry");
+  rb.disabled = true; rb.textContent = "Deneniyor…";
+  btn().disabled = true; btn().textContent = "Çalışıyor…";
+  dlEl.hidden = true;
+  // Panel sıfırlanmalı: yeniden deneme yalnızca eksik bölümleri akıtıyor,
+  // eski elemanlar durursa yeni metin başarısız bölümün üstüne yazılır.
+  sections = {};
+  outEl.className = "out empty"; outEl.textContent = "Eksik bölümler yeniden üretiliyor…";
+  for (const k in state) delete state[k];
+  try {
+    const r = await fetch(`/api/jobs/${sonIs}/retry`, { method: "POST" });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const job = await r.json();
+    $("#retrybox").hidden = true;
+    follow(job);
+  } catch (err) {
+    $("#retrywhy").textContent = err.message;
+    rb.disabled = false; rb.textContent = "Tekrar dene";
+    idle();
+  }
+});
+
+$("#f").addEventListener("submit", async e => {
+  e.preventDefault();
+  btn().disabled = true; btn().textContent = "Çalışıyor…";
+  outEl.className = "out empty"; outEl.textContent = "Başlatılıyor…";
+  sections = {}; dlEl.hidden = true; metaEl.hidden = true;
+  $("#retrybox").hidden = true;
+  for (const k in state) delete state[k];
+
+  try {
+    const r = await fetch("/api/jobs", { method: "POST", body: new FormData(e.target) });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    follow(await r.json());
+  } catch (err) {
+    outEl.className = "out"; outEl.innerHTML = `<div class="err">${err.message}</div>`;
+    idle();
+  }
+});
+</script>
+</body>
+</html>

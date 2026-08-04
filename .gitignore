@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.env
+.cache/
+out/
+node_modules/
+.next/
+
+# Ders/kitap PDF'leri depoya girmez: telifli materyal ve megabaytlarca ikili
+# dosya. Testler bunlara ihtiyaç duymaz — varsa çalışır, yoksa atlanır
+# (tests/*.py içindeki HAVE_PDFS).
+*.pdf
+!docs/**/*.pdf
