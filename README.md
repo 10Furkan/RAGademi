@@ -193,12 +193,3 @@ persistent user data rather than disposable cache.
 Detailed design decisions are documented in
 [`docs/architecture.md`](docs/architecture.md). Coding-agent guidance lives in
 [`CLAUDE.md`](CLAUDE.md).
-
-## Data and copyright
-
-Lecture, textbook, and past-exam PDFs are not committed because they may be
-copyrighted or contain personal data. Tests do not require those files; tests
-that use local real-world PDFs are skipped when the sources are absent.
-
-`.gitignore` also excludes environment files, local databases, generated output,
-virtual environments, and presentation files.
