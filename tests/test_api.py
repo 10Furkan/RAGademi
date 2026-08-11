@@ -137,16 +137,16 @@ def test_non_pdf_upload_rejected(client):
 def test_health_exposes_mode_options(client):
     """Arayüz seçenekleri tek kaynaktan (prompts.py) okumalı."""
     body = client.get("/api/health").json()
-    assert "standart" in body["depths"]
-    assert {"analoji", "soru", "sözlük"} <= set(body["extras"])
+    assert "standard" in body["depths"]
+    assert {"analogy", "quiz", "glossary"} <= set(body["extras"])
 
 
 def test_health_reports_available_backends(client):
     """Arayüz elde olmayan kimlik yolunu seçtirmemeli."""
     b = client.get("/api/health").json()["backends"]
-    assert b["resolved"] in ("api", "cli", "demo")
+    assert b["resolved"] in ("api", "cli", "codex", "demo")
     assert b["demo"]["available"] is True  # demo her zaman var
-    for key in ("api", "cli"):
+    for key in ("api", "cli", "codex"):
         assert isinstance(b[key]["available"], bool)
         assert b[key]["label"]
 
@@ -154,7 +154,7 @@ def test_health_reports_available_backends(client):
 def test_invalid_backend_rejected(client):
     r = client.post("/api/jobs", files=_files(), data={"backend": "gpt"})
     assert r.status_code == 400
-    assert "arka uç" in r.json()["detail"].lower()
+    assert "backend" in r.json()["detail"].lower()
 
 
 def test_backend_choice_is_recorded_on_the_job(client):
@@ -173,7 +173,7 @@ def _files():
 def test_invalid_depth_rejected(client):
     r = client.post("/api/jobs", files=_files(), data={"depth": "çok-derin"})
     assert r.status_code == 400
-    assert "derinlik" in r.json()["detail"].lower()
+    assert "depth" in r.json()["detail"].lower()
 
 
 def test_invalid_extra_rejected(client):
@@ -206,8 +206,8 @@ def test_mode_selection_is_recorded_on_the_job(client):
     )
     assert r.status_code == 200
     params = r.json()["params"]
-    assert params["depth"] == "derin"
-    assert params["extras"] == ["analoji", "soru"]
+    assert params["depth"] == "deep"
+    assert params["extras"] == ["analogy", "quiz"]
 
 
 def test_retry_unknown_job_is_404(client):
@@ -371,7 +371,7 @@ def test_job_with_unknown_material_is_404(client):
 def test_job_without_any_source_is_rejected(client):
     r = client.post("/api/jobs", data={"backend": "demo"})
     assert r.status_code == 400
-    assert "eksik" in r.json()["detail"].lower()
+    assert "missing" in r.json()["detail"].lower()
 
 
 def test_upload_through_job_lands_in_the_library(client):
@@ -407,7 +407,7 @@ def test_document_retry_refuses_when_source_is_gone(client, tmp_path):
     )
     r = client.post(f"/api/documents/{doc.id}/retry")
     assert r.status_code == 400
-    assert "silinmiş" in r.json()["detail"]
+    assert "deleted" in r.json()["detail"]
 
 
 def test_document_download_404_when_file_missing(client):
@@ -484,7 +484,7 @@ def test_reader_404_when_html_missing(client):
     doc = server.library.add_document(course_id=c["id"], title="X")
     r = client.get(f"/ders/{c['id']}/not/{doc.id}")
     assert r.status_code == 404
-    assert "okunabilir" in r.json()["detail"]
+    assert "readable" in r.json()["detail"]
 
 
 def test_reader_serves_saved_html(client, tmp_path):
@@ -508,7 +508,7 @@ def test_estimate_rejects_unreadable_lecture(client):
     r = client.get("/api/estimate",
                    params={"lecture_id": lec["id"], "book_id": book["id"]})
     assert r.status_code == 400
-    assert "okunamadı" in r.json()["detail"]
+    assert "could not be read" in r.json()["detail"]
 
 
 def test_estimate_needs_real_materials(client):
@@ -519,7 +519,7 @@ def test_estimate_needs_real_materials(client):
 def test_quota_endpoint_is_honest_when_unknown(client):
     """Kota yalnızca CLI akışında bildiriliyor; hiç çağrı yoksa null döner."""
     body = client.get("/api/quota").json()
-    assert body["backend"] in ("api", "cli", "demo")
+    assert body["backend"] in ("api", "cli", "codex", "demo")
     assert "rate_limit" in body
 
 
@@ -583,7 +583,7 @@ def test_full_demo_run_produces_downloadable_pdf(client):
     md = client.get(f"/api/jobs/{jid}/download?fmt=md")
     assert md.status_code == 200
     # Retrieval gerçekten çalıştıysa çıktıda kitap atıfı olmalı.
-    assert "[K:" in md.text
+    assert "[B:" in md.text
 
 
 # --- deneme sınavı ---------------------------------------------------------
@@ -620,7 +620,7 @@ def test_practice_rejects_an_absurd_question_count(client):
         "exam_id": exam["id"], "count": 500,
     })
     assert r.status_code == 400
-    assert "Soru sayısı" in r.json()["detail"]
+    assert "Question count" in r.json()["detail"]
 
 
 @pytest.mark.skipif(not HAVE_PDFS, reason="örnek PDF'ler yok")
@@ -677,8 +677,8 @@ def test_full_demo_practice_run_produces_a_paper_and_a_key(client, tmp_path):
 
     md = client.get(f"/api/documents/{belge['id']}/download?fmt=md").text
     # Anahtar SONDA: çözüm soruların altında olsaydı kâğıt denemelik olmazdı.
-    assert md.index("Soru 3") < md.index("# Cevap anahtarı")
-    assert "[K:" in md  # kitap atıfı gerçekten geldi
+    assert md.index("Question 3") < md.index("# Answer key")
+    assert "[B:" in md
     assert "0x9C" in md  # geçmiş kâğıttan birebir alıntı
 
     # Sorular aramaya girmiş olmalı, çıpası soru numarası.

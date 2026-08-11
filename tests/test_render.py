@@ -73,7 +73,7 @@ def test_book_citation_becomes_margin_chip():
 def test_slide_citation_becomes_chip():
     html = markdown_to_html("Slayttan. [S: 22]")
     assert 'class="cite cite-slide"' in html
-    assert "Slayt 22" in html
+    assert "Slide 22" in html
 
 
 def test_citation_html_is_escaped():
@@ -156,14 +156,14 @@ def test_figure_marker_never_leaks_raw_without_lecture_pdf():
     html = markdown_to_html("metin\n\n[ŞEKİL: slayt 22]\n\nsonrası")
     assert "[ŞEKİL" not in html
     assert "figure-missing" in html
-    assert "Slayt 22" in html
+    assert "Slide 22" in html
     assert "sonrası" in html
 
 
 def test_callout_containers_render_as_aside():
     html = markdown_to_html("::: soru\n1. Soru\n:::")
     assert 'class="callout callout-quiz"' in html
-    assert "Kendini sına" in html
+    assert "Self-check" in html
     assert "<ol>" in html  # içerik markdown olarak işlenmeli, ham değil
     assert ":::" not in html
 

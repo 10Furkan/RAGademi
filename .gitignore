@@ -15,3 +15,5 @@ node_modules/
 # (tests/*.py içindeki HAVE_PDFS).
 *.pdf
 !docs/**/*.pdf
+
+*.pptx

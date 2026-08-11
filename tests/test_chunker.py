@@ -57,7 +57,7 @@ def test_citation_formats_single_and_range():
     chunks = chunk_book(make_book(sections, 4), pages, target_tokens=150)
     assert chunks
     for c in chunks:
-        assert "s." in c.citation
+        assert "p." in c.citation
         assert c.section_title in c.citation
 
 

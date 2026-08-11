@@ -1,4 +1,4 @@
-"""Çalışma zamanı ayarları. Ortam değişkenleri veya .env dosyasından okunur."""
+"""Runtime settings loaded from environment variables or a .env file."""
 
 from __future__ import annotations
 
@@ -12,16 +12,17 @@ class Settings(BaseSettings):
         env_file=".env", env_prefix="DERSNOTU_", extra="ignore"
     )
 
-    # --- Modeller -------------------------------------------------------
-    # Genişletme (asıl maliyet kalemi). Sonnet 5 varsayılan; Opus 5 premium.
+    # --- Models ---------------------------------------------------------
+    # Main generation model and inexpensive classification/topic-card model.
     model: str = "claude-sonnet-5"
-    # Konu kartı / sınıflandırma gibi ucuz geçişler.
     cheap_model: str = "claude-haiku-4-5"
+    # Empty means: use the model selected by Codex CLI.
+    codex_model: str = ""
     # low | medium | high | xhigh | max
     effort: str = "high"
     max_tokens: int = 16000
 
-    # --- Dizinler -------------------------------------------------------
+    # --- Directories ----------------------------------------------------
     cache_dir: Path = Path(".cache")
     out_dir: Path = Path("out")
 
@@ -29,29 +30,23 @@ class Settings(BaseSettings):
     chunk_target_tokens: int = 900
     chunk_overlap_ratio: float = 0.15
     chunks_per_section: int = 6
-    # Kitaptaki diyagramları çıkarıp çıktıya yerleştir. İlk indeksleme sırasında
-    # ~95 sn ekler (1105 sayfa), sonrasında önbellekten gelir.
+    # Extract textbook diagrams for insertion into generated documents.
     extract_book_figures: bool = True
-    # Bir bölümde modele önerilecek azami kitap şekli — liste uzarsa model
-    # ilgisiz şekil çağırmaya başlıyor.
+    # Maximum textbook figures offered to the model per section.
     figures_per_section: int = 6
 
-    # --- Ders PDF'i -----------------------------------------------------
-    # Bir slaytı "görsel" saymak için gereken vektör nesne sayısı eşiği.
-    # Slayt şablonunun kendi çerçevesi ~6 nesne üretir; gerçek şemalar 40+.
+    # --- Lecture PDF ----------------------------------------------------
+    # Vector-object threshold for treating a slide as visual.
     visual_shape_threshold: int = 20
-    # Tek genişletme çağrısına giren azami slayt sayısı.
+    # Maximum slides in one expansion call.
     max_section_slides: int = 8
-    # Claude'a kaç slayt görüntüsü gönderilebileceğinin üst sınırı (maliyet freni).
+    # Maximum slide images sent to a model.
     max_slide_images: int = 30
-    # Slayt görüntüsünün uzun kenarı (piksel). Token maliyeti ALANLA orantılı:
-    # kenarı yarıya indirmek görüntü maliyetini dörtte bire düşürür.
+    # Long edge of a rendered slide. Image-token cost scales with area.
     slide_image_max_edge: int = 1400
 
-    # --- Kitaplık -------------------------------------------------------
-    # Dersler, yüklenmiş materyaller ve üretilmiş dokümanlar. `.cache` altında
-    # duruyor ama silinebilir bir önbellek DEĞİL: burayı silmek kullanıcının
-    # ders listesini silmek demek.
+    # --- Library --------------------------------------------------------
+    # Persistent courses, uploaded materials, and generated documents.
     library_name: str = "library.sqlite"
 
     @property

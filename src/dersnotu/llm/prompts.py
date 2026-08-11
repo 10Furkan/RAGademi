@@ -1,162 +1,146 @@
-"""Prompt şablonları.
+"""Prompt templates and user-selectable generation directives.
 
-Tasarım kararı: sistem promptu SABİT tutulur. İçine tarih, ders adı, dil gibi
-değişken hiçbir şey enterpolasyon yapılmaz — sistem promptu önek zincirinin en
-başında render edildiği için oradaki tek bayt değişikliği tüm cache'i düşürür.
-Değişken her şey mesaj gövdesine, cache kırılma noktasından SONRA yazılır.
+The system prompts are deliberately byte-stable. Course names, output language,
+depth, and other variable data belong in the message body after the cache
+breakpoint so different sections and modes can reuse the same prefix.
 """
 
 from __future__ import annotations
 
 EXPAND_SYSTEM = """\
-Sen bir üniversite ders asistanısın. Görevin, derse gelemeyen bir öğrencinin \
-slaytlara bakarak konuyu tek başına öğrenebilmesini sağlamak.
+You are a university teaching assistant. Your job is to let a student who missed \
+the lecture learn the material independently from the slides.
 
-Elinde iki kaynak var:
-1. DERS SLAYTLARI — öğrencinin sınavdan sorumlu olduğu kapsamı belirler. Kapsam budur.
-2. KİTAP ALINTILARI — açıklamanın geldiği yer. Detay, tanım ve kanıt buradan gelir.
+You have two sources:
+1. LECTURE SLIDES — define the assessed scope. Do not expand this scope.
+2. TEXTBOOK EXCERPTS — provide explanations, definitions, detail, and evidence.
 
-Kurallar:
+RULES
 
-KAPSAM
-- Slaytların kapsamını genişletme. Slaytta olmayan bir konuyu, kitapta geçse bile, \
-ana başlık olarak ekleme. Slayttaki bir noktayı açıklamak için gerekli olan arka \
-plan bilgisi bunun istisnasıdır.
-- Slayttaki HER maddeyi işle. Slaytta olup da açıklamadığın bir şey kalmasın.
+SCOPE
+- Do not add a topic as a main heading merely because it appears in the textbook. \
+Background information required to explain a slide point is the only exception.
+- Cover EVERY point in the slides. Do not leave a slide item unexplained.
 
-ATIF — bu kuralı ihlal etme
-- Kitaptan gelen her önemli iddianın sonuna `[K: <bölüm>, s. <sayfa>]` biçiminde \
-atıf koy. Atıf verisi sana her alıntının başında veriliyor; birebir onu kullan.
-- Slayttan gelen bilgiye `[S: <slayt no>]` koy.
-- Kaynaklarda karşılığı olmayan bir şey yazma. Bir noktayı açıklamak için gereken \
-bilgi ne slaytta ne kitapta varsa, uydurma — bunun yerine \
-`> ⚠️ Bu nokta slaytta var ama verilen kitap alıntılarında karşılığı bulunamadı.` \
-satırını yaz ve devam et.
+GROUNDING — never violate this rule
+- End every important textbook-derived claim with `[B: <section>, p. <page>]`. \
+The exact citation appears before each excerpt; reproduce it exactly.
+- Mark slide-derived information with `[S: <slide number>]`.
+- Do not state claims unsupported by either source. When a slide point lacks \
+matching textbook evidence, write: \
+`> ⚠️ This point appears in the slides, but no supporting passage was found in the provided textbook excerpts.`
 
-BİÇİM
-- Markdown. Bölüm başlığı `##`, alt başlıklar `###`.
-- Matematik LaTeX: satır içi `$...$`, blok `$$...$$`. Unicode alt/üst simge KULLANMA \
-(₀¹²) — `$x_1$`, `$2^{w-1}$` yaz.
-- Kod bloklarında dil etiketi kullan (```c, ```asm).
-- Bir slaytta önemli bir şema/tablo varsa ve onu metinle tam anlatamıyorsan \
-`[ŞEKİL: slayt <no>]` satırı bırak — sistem oraya orijinal görseli yerleştirecek.
-- Sana "Kullanılabilir kitap şekilleri" listesi verildiyse, anlatımı gerçekten \
-güçlendirecek olanı `[KŞEKİL: <numara>]` satırıyla çağır — sistem kitaptaki \
-diyagramı oraya kırpıp koyacak. YALNIZCA listede olan numarayı yaz; listede \
-olmayan bir şekli uydurma. Her şekli çağırma, sadece gerekeni.
+FORMAT
+- Markdown. Use `##` for the section title and `###` for subheadings.
+- Use LaTeX for mathematics: inline `$...$`, display `$$...$$`. Do not use \
+Unicode subscripts or superscripts; write `$x_1$` and `$2^{w-1}$`.
+- Add a language tag to fenced code blocks (for example, ```c or ```asm).
+- If an important slide diagram or table cannot be fully expressed in prose, \
+place `[FIGURE: slide <number>]` on its own line. The renderer inserts the original.
+- When an "Available textbook figures" list is supplied, request only a genuinely \
+useful listed figure with `[BOOKFIGURE: <number>]` on its own line. Never invent \
+a figure number and do not insert every available figure.
 
-ÜSLUP
-- Doğrudan anlat. "Bu bölümde göreceğiz ki", "Umarım anlaşılmıştır" gibi dolgu yok.
-- Somut sayısal örnekle göster. Soyut kuralı verip geçme; 8-bit veya 16-bit \
-somut bir değer üzerinde adım adım çalıştır.
-- Öğrencinin takılacağı yeri öngör ve açıkça uyar (ör. işaretli/işaretsiz \
-karşılaştırmada örtük dönüşüm).
-- Uzunluğu içeriğe göre ayarla: yoğun bir slayt uzun, tek fikirli bir slayt kısa \
-açıklama hak eder. Dolgu ile uzatma.
+STYLE
+- Be direct. Avoid filler such as "In this section we will see".
+- Demonstrate abstract rules with concrete 8-bit or 16-bit numerical examples.
+- Anticipate common sticking points and warn about them explicitly.
+- Match length to information density. Do not pad a simple slide.
 """
 
 TOPIC_SYSTEM = """\
-Slayt bloklarını analiz edip her biri için yapısal bir konu kartı üretiyorsun.
-Amaç, ders kitabında arama yapmak için iyi bir sorgu kurmak.
+Analyze each slide block and produce a structured topic card used to search a textbook.
 
-Sadece geçerli JSON döndür, başka hiçbir şey yazma. Şema:
+Return valid JSON only, with this schema:
 {"title": str, "key_terms": [str], "formulas": [str], "gaps": [str]}
 
-- title: bölümün başlığı, sana bildirilen ÇIKTI DİLİNDE (teknik terimler İngilizce kalabilir)
-- key_terms: kitapta aranacak teknik terimler, İNGİLİZCE (kitap İngilizce) — en fazla 12
-- formulas: slaytta geçen formül/gösterimler — en fazla 6
-- gaps: slaytta değinilip açıklanmayan, kitaptan gelmesi gereken noktalar — en fazla 6
+- title: section title in the requested OUTPUT LANGUAGE
+- key_terms: technical search terms in ENGLISH, at most 12
+- formulas: formulas or notation from the slides, at most 6
+- gaps: slide points that need textbook explanation, at most 6
 """
 
 ALIGN_SYSTEM = """\
-Bir ders slaytı dizisini ders kitabının içindekiler ağacıyla eşleştiriyorsun.
+Align lecture-slide sections with the textbook table-of-contents tree.
 
-Sadece geçerli JSON döndür. Şema:
+Return valid JSON only, with this schema:
 {"alignments": [{"section_index": int, "book_sections": [str], "page_start": int, "page_end": int, "confidence": "low"|"medium"|"high"}]}
 
-- Her ders bölümü için kitapta hangi sayfa aralığının okunması gerektiğini belirt.
-- Sayfa numaraları sana verilen içindekiler listesindeki PDF sayfa numaralarıdır.
-- Aralığı cömert tut (ilgili alt bölümün tamamı), ama tüm kitabı kapsama.
-- Emin değilsen confidence "low" ver ve aralığı geniş tut.
+- Identify the textbook page range that should be searched for each lecture section.
+- Page numbers are PDF page numbers from the supplied table of contents.
+- Include the full relevant subsection, but never span the entire book.
+- When uncertain, use confidence "low" and choose a somewhat wider range.
 """
 
 
-# --- Derinlik ve açıklama biçimi -------------------------------------------
-# Bunlar sistem promptuna GİRMEZ: sistem promptu cache önekinin ilk baytı ve
-# sabit kalmak zorunda. Kullanıcı seçimleri kırılma noktasından sonraki gövdeye
-# yazılır, böylece iki farklı derinlik aynı cache'i paylaşabilir.
-
+# These directives are appended after the cache breakpoint.
 DEPTHS: dict[str, str] = {
-    "özet": (
-        "DERİNLİK: ÖZET. Her slayt maddesini en fazla bir paragrafta karşıla. "
-        "Tek bir somut örnek ver, onu da en kritik noktaya sakla. "
-        "Türetme ve ispat yazma; sonucu ver ve nereden geldiğini tek cümleyle söyle."
+    "summary": (
+        "DEPTH: SUMMARY. Cover each slide point in at most one paragraph. Give one "
+        "concrete example at the most important point. Skip derivations and proofs; "
+        "state the result and explain its origin in one sentence."
     ),
-    "standart": "",  # sistem promptundaki varsayılan davranış
-    "derin": (
-        "DERİNLİK: DERİN. Her formülü adım adım türet, ara adımı atlama. "
-        "Kenar durumlarını tek tek göster: taşma, işaret uzatma, sıfır, "
-        "temsil edilebilir en negatif değer. Kitaptaki ilgili alıştırmayı "
-        "çözülmüş örnek olarak işle."
+    "standard": "",
+    "deep": (
+        "DEPTH: DEEP. Derive every formula step by step without skipping intermediate "
+        "steps. Examine edge cases such as overflow, sign extension, zero, and the "
+        "most negative representable value. Work through a relevant textbook exercise."
     ),
 }
 
 EXTRAS: dict[str, str] = {
-    "analoji": (
-        "Zor kavramları günlük hayattan bir analojiyle destekle. Her analojiyi "
-        "şu blokla ver:\n"
-        "::: analoji\nAnaloji metni.\n\n**Nerede bozulur:** ...\n:::\n"
-        "Analojinin bozulduğu yeri MUTLAKA yaz — sınırı söylenmeyen analoji "
-        "öğrenciye yanlış model kurdurur."
+    "analogy": (
+        "Support difficult concepts with an everyday analogy using this block:\n"
+        "::: analogy\nAnalogy text.\n\n**Where it breaks down:** ...\n:::\n"
+        "Always state where the analogy fails so it does not create a false model."
     ),
-    "örnek": (
-        "Her ana kavram için slayttakinden FARKLI, ek bir sayısal örnek çalıştır. "
-        "Örneği baştan sona adım adım götür; sonucu verip geçme."
+    "example": (
+        "For every main concept, work through an additional numerical example that is "
+        "different from the slides. Show every step instead of jumping to the result."
     ),
-    "soru": (
-        "Bölümün sonuna öğrencinin kendini sınayacağı 3-5 soru ekle. "
-        "Sorular hatırlatma değil uygulama olsun (hesapla, dönüştür, karşılaştır). "
-        "Şu blokla ver:\n"
-        "::: soru\n1. Soru metni\n2. Soru metni\n\n**Yanıtlar:** 1) ... 2) ...\n:::"
+    "quiz": (
+        "End the section with 3–5 application questions using this block:\n"
+        "::: quiz\n1. Question text\n2. Question text\n\n**Answers:** 1) ... 2) ...\n:::\n"
+        "Use tasks such as calculate, convert, and compare rather than recall prompts."
     ),
-    "sözlük": (
-        "Bölümün sonuna geçen teknik terimlerin tablosunu ekle. Şu blokla ver:\n"
-        "::: sözlük\n| Terim | İngilizce | Anlamı |\n|---|---|---|\n"
-        "| ... | ... | ... |\n:::\n"
-        "İngilizce sütunu kitapta ve sınavda geçen terimi tutar; öğrenci "
-        "kaynağa döndüğünde eşleştirebilmeli."
+    "glossary": (
+        "End the section with a glossary using this block:\n"
+        "::: glossary\n| Term | Meaning |\n|---|---|\n| ... | ... |\n:::\n"
+        "Use the exact technical terminology found in the textbook and exam."
     ),
 }
 
-
-# Arayüzde gösterilen kısa açıklamalar. Direktiflerin HEMEN YANINDA duruyorlar
-# ve arayüz bunları `/api/health` üzerinden okuyor — açıklama ikinci bir yerde
-# yazılı olsaydı direktif değişince sessizce yalan söylemeye başlardı.
 DEPTH_HELP: dict[str, str] = {
-    "özet": "Her maddeye en fazla bir paragraf. Türetme ve ispat yok: sonuç "
-            "verilir, nereden geldiği tek cümleyle söylenir. Tekrar için.",
-    "standart": "Varsayılan. Slayttaki her maddeyi somut sayısal bir örnek "
-                "üzerinden açar, takılacağın yeri önceden uyarır.",
-    "derin": "Her formülü adım adım türetir, ara adımı atlamaz. Kenar "
-             "durumlarını tek tek gösterir: taşma, işaret uzatma, sıfır, en "
-             "negatif değer. Kitaptaki alıştırmayı çözülmüş örnek olarak işler.",
+    "summary": "At most one paragraph per slide point, with no derivations or proofs. Best for review.",
+    "standard": "Default. Explains every slide point through concrete numerical examples and anticipates common mistakes.",
+    "deep": "Derives formulas step by step, examines edge cases, and works through relevant textbook exercises.",
 }
 
 EXTRA_HELP: dict[str, str] = {
-    "analoji": "Zor kavramı günlük hayattan bir benzetmeyle açar ve "
-               "benzetmenin NEREDE BOZULDUĞUNU da yazar — sınırı söylenmeyen "
-               "analoji öğrenciye yanlış model kurdurur.",
-    "örnek": "Her ana kavram için slayttakinden FARKLI, ek bir sayısal örneği "
-             "baştan sona adım adım çalıştırır.",
-    "soru": "Bölüm sonuna 3-5 soru ve yanıtlarını ekler. Hatırlatma değil "
-            "uygulama: hesapla, dönüştür, karşılaştır.",
-    "sözlük": "Bölümde geçen terimlerin Türkçe/İngilizce/anlam tablosunu ekler. "
-              "İngilizce sütunu kitapta ve sınavda geçen terimi tutar.",
+    "analogy": "Adds an everyday analogy and explicitly states where the analogy breaks down.",
+    "example": "Works through an additional numerical example for every main concept.",
+    "quiz": "Adds 3-5 application questions with answers at the end of each section.",
+    "glossary": "Adds a table of technical terms and their meanings at the end of each section.",
 }
+
+# Accepted only at input boundaries for documents and commands created before
+# the English interface. They are normalized immediately and are never displayed.
+LEGACY_DEPTHS = {"özet": "summary", "standart": "standard", "derin": "deep"}
+LEGACY_EXTRAS = {"analoji": "analogy", "örnek": "example", "soru": "quiz", "sözlük": "glossary"}
+
+
+def normalize_depth(value: str) -> str:
+    return LEGACY_DEPTHS.get(value, value)
+
+
+def normalize_extras(values: list[str]) -> list[str]:
+    return [LEGACY_EXTRAS.get(value, value) for value in values]
 
 
 def build_output_directives(language: str, depth: str, extras: list[str]) -> list[str]:
-    """Kullanıcının seçtiği dil/derinlik/biçim direktiflerini satırlara çevirir."""
+    """Convert output selections into prompt directives."""
+    depth = normalize_depth(depth)
+    extras = normalize_extras(extras)
     lines: list[str] = []
     if depth_text := DEPTHS.get(depth, ""):
         lines.append(depth_text)
@@ -164,90 +148,66 @@ def build_output_directives(language: str, depth: str, extras: list[str]) -> lis
         if text := EXTRAS.get(key):
             lines.append(text)
     lines.append(
-        f"Bu bölümü {language} dilinde yaz. Açıklama metninin tamamı {language} "
-        "olmalı. İki istisna: teknik terimler ilk geçtiklerinde parantez içinde "
-        "İngilizcesiyle verilir (kitap ve sınav İngilizce), ve `[K: ...]` / "
-        "`[S: ...]` / `[ŞEKİL: ...]` işaretçileri harfi harfine bu biçimde kalır — "
-        "bunlar sistem tarafından ayrıştırılıyor, çevrilirse kaybolur."
+        f"Write this section in {language}. All explanatory prose must be in {language}. "
+        "Keep technical terms in their source form when needed, and preserve `[B: ...]`, "
+        "`[S: ...]`, `[FIGURE: ...]`, and `[BOOKFIGURE: ...]` markers exactly because "
+        "the renderer parses them."
     )
     return lines
 
 
-# Geçmiş sınav kâğıdı verildiğinde eklenen kural. Sınav metni önekte taşınır
-# (bölümler arasında değişmez), bu direktif de oraya girer.
-#
-# Buradaki disiplin projenin geri kalanıyla aynı: model "bu konu 2023'te
-# soruldu" diye SERBESTÇE iddia edemez, soruyu birebir alıntılamak zorunda.
-# Alıntılayamıyorsa iddia da yok. Atıf kuralının sınav kâğıdına uyarlanmışı.
 EXAM_RULE = """\
-GEÇMİŞ SINAV KÂĞIDI
-- Sana bu dersin geçmiş sınav sorularının metni verildi. Bunu KAPSAM \
-GENİŞLETMEK için kullanma — kapsamı hâlâ slaytlar belirler.
-- Kullanımı şudur: slayttaki bir konu geçmiş sınavda SORULMUŞSA, o konuyu \
-daha derin işle ve öğrenciyi soru tipine hazırla.
-- Böyle bir konuyu şu blokla işaretle:
-::: sınav
-**Sorulmuş:** soruyu birebir alıntıla.
+PAST EXAM PAPER
+- Use the supplied past questions to adjust depth, never to expand scope. Slides \
+still define what the student is responsible for.
+- When a slide topic was asked in the past exam, explain it more deeply and prepare \
+the student for that question type.
+- Mark such a topic with this block:
+::: exam
+**Previously asked:** quote the question verbatim.
 
-Çözüm yolu / nelere dikkat edilmeli.
+Solution approach and points to watch.
 :::
-- Soruyu birebir alıntılayamıyorsan bu bloğu HİÇ yazma. "Bu konu sınavda \
-çıkar" gibi dayanaksız bir iddia, kaynaksız bir cümle yazmakla aynı şeydir.
-- Sınav kâğıdında olup slaytta olmayan konuyu ana başlık yapma; en fazla \
-bölümün sonunda tek satırla "sınavda geçmiş ama slaytta yok" diye not düş.
+- If you cannot quote the question verbatim, do not create this block. An unsupported \
+claim that a topic appeared in an exam is no better than any other unsupported claim.
+- If an exam topic is absent from the slides, do not make it a heading. At most, note \
+in one sentence that it appeared in the exam but falls outside the slide scope.
 """
 
 
-# --- Deneme sınavı ---------------------------------------------------------
-# Geçmiş sınav kâğıdının İKİNCİ kullanımı. `EXAM_RULE` ders notunda derinliği
-# kaydırıyor; burada kâğıdın kendisi bir ŞABLON.
-#
-# Üç kaynağın işi burada da ayrı ve karıştırılmamalı:
-#   geçmiş sınav → BİÇİM (soru tipi, uzunluk, puan, zorluk)
-#   slaytlar     → KAPSAM (neyden sorumlusun)
-#   kitap        → DOĞRULUK (çözümdeki her iddianın kaynağı)
-# Kâğıdın kapsamı belirlemesine izin vermek, öğrenciye sorumlu olmadığı
-# konudan soru çözdürmek demek olurdu.
 PRACTICE_SYSTEM = """\
-Bir üniversite dersi için DENEME SINAVI hazırlıyorsun. Öğrenci sana bu dersin \
-geçmiş sınav kâğıdını, ders slaytlarını ve ders kitabından alıntıları verdi.
+Create a PRACTICE EXAM for a university course from a past exam paper, lecture \
+slides, and retrieved textbook excerpts.
 
-ÜÇ KAYNAK, ÜÇ AYRI İŞ — karıştırma:
-1. GEÇMİŞ SINAV KÂĞIDI → BİÇİMİ verir. Soru tipleri, soru uzunluğu, puan \
-dağılımı, zorluk seviyesi, hangi beceriyi ölçtüğü. Kapsamı BELİRLEMEZ.
-2. DERS SLAYTLARI → KAPSAMI verir. Sadece slaytta işlenmiş konulardan sor.
-3. KİTAP ALINTILARI → DOĞRULUĞU verir. Çözümdeki bilgi buradan gelir.
+THREE SOURCES, THREE DISTINCT ROLES
+1. PAST EXAM PAPER → FORMAT: question types, length, point distribution, difficulty, \
+and assessed skills. It does not define scope.
+2. LECTURE SLIDES → SCOPE: ask only about topics covered in the slides.
+3. TEXTBOOK EXCERPTS → ACCURACY: solutions and factual claims come from here.
 
-KOPYALAMA YASAK — bu görevin özü
-- Geçmiş sınav sorusunu olduğu gibi sorma. Aynı BECERİYİ ölçen YENİ bir soru \
-kur: sayılar, adresler, kod, dizgeler, bit genişlikleri farklı olsun.
-- Öğrenci geçmiş kâğıdı zaten okuyabilir. Senin işin onu ezberletmek değil, \
-aynı türden yeni bir soruyla sınamak.
+DO NOT COPY
+- Never repeat a past question unchanged. Create a new question assessing the same \
+skill with different numbers, addresses, code, strings, or bit widths.
+- The student can already read the past paper; test transfer, not memorization.
 
-DAYANAK — bu kuralı ihlal etme
-- Her soru için `modeled_on` alanına, örnek aldığın geçmiş sınav sorusunu \
-BİREBİR yaz. Kâğıtta öyle bir soru yoksa alanı BOŞ bırak.
-- Boş bırakmak serbesttir, uydurmak değildir. "Bu tarz sınavda çıkmıştı" \
-diyip alıntılayamamak, kaynaksız bir cümle yazmakla aynı şeydir.
-- `slides` alanına sorunun dayandığı slayt numaralarını yaz — kapsam kanıtı.
-- `citations` alanına çözümü destekleyen kitap atıflarını `<bölüm>, s. <sayfa>` \
-biçiminde yaz; alıntıların başında sana verilen künyeyi birebir kullan.
+GROUNDING
+- For each question, place the exact past question used as a model in `modeled_on`. \
+Leave the field empty when no such question exists; never invent one.
+- Put the supporting slide numbers in `slides` as scope evidence.
+- Put supporting textbook citations in `citations` as `<section>, p. <page>`, using \
+the exact labels supplied with the excerpts.
 
-ÇÖZÜM
-- `answer` kısa ve kesin olsun (şık harfi, sayı, tek cümle).
-- `solution` adım adım olsun: öğrenci nerede takılacaksa orada yavaşla. \
-Sonucu verip geçme, ara adımı göster.
-- Çoktan seçmelide ÇELDİRİCİLER rastgele olmasın; her biri TİPİK BİR HATADAN \
-türesin (işaret uzatmayı unutmak, taşmayı gözden kaçırmak, bayt/bit karışması). \
-`solution` içinde hangi çeldiricinin hangi hataya karşılık geldiğini söyle.
+SOLUTIONS
+- Keep `answer` short and exact.
+- Make `solution` step-by-step, slowing down at likely failure points.
+- For multiple-choice questions, derive every distractor from a typical mistake and \
+explain those mistakes in `solution`.
 
-BİÇİM
-- Markdown. Matematik LaTeX: satır içi `$...$`, blok `$$...$$`. Unicode alt/üst \
-simge KULLANMA (₀¹²) — `$x_1$`, `$2^{w-1}$` yaz.
-- Kod bloklarında dil etiketi kullan (```c, ```asm).
-- `choices` yalnızca çoktan seçmeli sorularda dolu olsun; şık harflerini \
-(A), B)) yazma, sistem numaralandırıyor.
-- Zorluğu ve puanları geçmiş kâğıdın dağılımına benzet.
+FORMAT
+- Markdown with LaTeX mathematics and language-tagged code fences.
+- Populate `choices` only for multiple-choice questions; omit option letters because \
+the renderer adds them.
+- Match the difficulty and point distribution of the past paper.
 """
 
 PRACTICE_SCHEMA = {
@@ -285,107 +245,77 @@ PRACTICE_SCHEMA = {
 }
 
 
-def build_practice_request(
-    lecture,
-    exam_text: str,
-    chunks,
-    language: str,
-    *,
-    count: int = 0,
-) -> str:
-    """Deneme sınavı isteğinin gövdesi.
-
-    `count == 0` "geçmiş kâğıtta kaç soru varsa o kadar" demek. Sabit bir sayı
-    dayatmak kâğıdın biçimini taklit etme işine ters düşerdi: 4 soruluk bir
-    finalin denemesi 20 soruyla yapılmaz.
-    """
+def build_practice_request(lecture, exam_text: str, chunks, language: str, *, count: int = 0) -> str:
+    """Build the variable request body for a complete practice exam."""
     parts = [
-        f"# DERS: {lecture.title}",
-        f"{len(lecture.slides)} slayt, {len(lecture.sections)} bölüm.",
+        f"# COURSE: {lecture.title}",
+        f"{len(lecture.slides)} slides, {len(lecture.sections)} sections.",
         "",
-        "## KAPSAM — ders slaytları",
-        "(Yalnızca burada işlenen konulardan soru sor.)",
+        "## SCOPE — lecture slides",
+        "(Ask questions only about topics covered here.)",
         "",
     ]
-    for s in lecture.slides:
-        if s.is_divider:
+    for slide in lecture.slides:
+        if slide.is_divider:
             continue
-        parts.append(f"### Slayt {s.number}: {s.title}")
-        if s.text:
-            parts.append(s.text)
+        parts.append(f"### Slide {slide.number}: {slide.title}")
+        if slide.text:
+            parts.append(slide.text)
         parts.append("")
 
     parts += [
-        "## BİÇİM — geçmiş sınav kâğıdı",
-        "(Soru tipini, uzunluğu, puanlamayı ve zorluğu buradan al. "
-        "Soruları KOPYALAMA; örnek aldığın soruyu `modeled_on` alanına yaz.)",
+        "## FORMAT — past exam paper",
+        "(Match its question types, length, points, and difficulty. Do not copy questions; quote the model question in `modeled_on`.)",
         "",
-        exam_text or "(Sınav metni okunamadı.)",
+        exam_text or "(The exam text could not be extracted.)",
         "",
     ]
-
     if chunks:
-        parts += [
-            "## DOĞRULUK — kitap alıntıları",
-            "(Çözümlerdeki bilgi buradan gelsin; künyeyi `citations` alanına yaz.)",
-            "",
-        ]
-        for c in chunks:
-            parts += [f"### [K: {c.citation}]", c.text, ""]
+        parts += ["## ACCURACY — textbook excerpts", "(Use these in solutions and copy their labels into `citations`.)", ""]
+        for chunk in chunks:
+            parts += [f"### [B: {chunk.citation}]", chunk.text, ""]
     else:
         parts += [
-            "## DOĞRULUK — kitap alıntıları",
-            "(Eşleşen alıntı bulunamadı. Yalnızca slayta dayan; emin olmadığın "
-            "bir çözümü yazmaktansa o soruyu hiç sorma.)",
+            "## ACCURACY — textbook excerpts",
+            "(No matching excerpts were found. Rely only on slides and omit any question whose solution would be uncertain.)",
             "",
         ]
 
-    adet = (
-        "Geçmiş kâğıtta kaç soru varsa o kadar soru üret (en az 4, en çok 25)."
+    amount = (
+        "Generate the same number of questions as the past paper, with a minimum of 4 and maximum of 25."
         if count <= 0
-        else f"Tam olarak {count} soru üret."
+        else f"Generate exactly {count} questions."
     )
     parts += [
         "---",
-        "## Görev",
-        adet,
-        f"Soruları ve çözümleri {language} dilinde yaz. Teknik terimler ilk "
-        "geçtiklerinde parantez içinde İngilizcesiyle verilir (kitap ve sınav "
-        "İngilizce).",
-        "`profile` alanına geçmiş kâğıtta gözlemlediğin biçimi bir iki cümleyle "
-        "yaz: kaç soru, hangi tipler, ne ölçülüyor. Bu, senin neye benzettiğinin "
-        "denetlenebilmesi için.",
-        "`duration_minutes` alanına kâğıtta yazan süreyi koy; yazmıyorsa "
-        "soruların ağırlığına göre makul bir süre tahmin et.",
+        "## Task",
+        amount,
+        f"Write all questions and solutions in {language}.",
+        "In `profile`, summarize the observed paper format in one or two sentences.",
+        "Use the stated exam duration for `duration_minutes`; if none is stated, estimate a reasonable duration from question weight.",
     ]
     return "\n".join(parts)
 
 
-def build_lecture_context(
-    lecture, alignment_note: str = "", exam_text: str = ""
-) -> str:
-    """Tüm çağrılarda AYNI kalan ders bağlamı — cache'lenen kısım.
-
-    Sınav metni de buraya giriyor: bölümden bölüme değişmediği için önekte
-    durması doğru yer, bir kez yazılıp her bölümde ucuza okunur.
-    """
+def build_lecture_context(lecture, alignment_note: str = "", exam_text: str = "") -> str:
+    """Build the byte-stable lecture context shared by every section call."""
     lines = [
-        f"# DERS: {lecture.title}",
-        f"Toplam {len(lecture.slides)} slayt, {len(lecture.sections)} bölüm.",
+        f"# COURSE: {lecture.title}",
+        f"{len(lecture.slides)} slides, {len(lecture.sections)} sections total.",
         "",
-        "## Ders içeriğinin tamamı (bağlam için)",
+        "## Complete lecture content for context",
         "",
     ]
-    for s in lecture.slides:
-        marker = " [AJANDA]" if s.is_divider else ""
-        lines.append(f"### Slayt {s.number}: {s.title}{marker}")
-        if s.text:
-            lines.append(s.text)
+    for slide in lecture.slides:
+        marker = " [AGENDA]" if slide.is_divider else ""
+        lines.append(f"### Slide {slide.number}: {slide.title}{marker}")
+        if slide.text:
+            lines.append(slide.text)
         lines.append("")
     if alignment_note:
-        lines += ["## Kitap eşlemesi", alignment_note, ""]
+        lines += ["## Textbook alignment", alignment_note, ""]
     if exam_text:
-        lines += ["## GEÇMİŞ SINAV SORULARI", exam_text, "", EXAM_RULE, ""]
+        lines += ["## PAST EXAM QUESTIONS", exam_text, "", EXAM_RULE, ""]
     return "\n".join(lines)
 
 
@@ -395,64 +325,56 @@ def build_section_request(
     chunks,
     language: str,
     *,
-    depth: str = "standart",
+    depth: str = "standard",
     extras: list[str] | None = None,
     figures: list | None = None,
 ) -> str:
-    """Bölüme özel, cache kırılma noktasından SONRA gelen değişken kısım."""
+    """Build section-specific content placed after the cache breakpoint."""
     a, b = section.slide_range
     parts = [
         "---",
-        f"# ŞİMDİ YAZILACAK BÖLÜM: {topic.title if topic else ''}",
-        f"Slaytlar {a}-{b}.",
+        f"# SECTION TO WRITE NOW: {topic.title if topic else ''}",
+        f"Slides {a}–{b}.",
         "",
-        "## Bu bölümün slaytları",
+        "## Slides in this section",
         section.raw_text,
         "",
     ]
     if topic and topic.gaps:
-        parts += [
-            "## Slaytta eksik olup açıklanması gereken noktalar",
-            "\n".join(f"- {g}" for g in topic.gaps),
-            "",
-        ]
+        parts += ["## Slide points that require explanation", "\n".join(f"- {gap}" for gap in topic.gaps), ""]
 
     if chunks:
-        parts += ["## KİTAP ALINTILARI (atıf için kaynak)", ""]
-        for c in chunks:
-            parts += [f"### [K: {c.citation}]", c.text, ""]
+        parts += ["## TEXTBOOK EXCERPTS (grounding sources)", ""]
+        for chunk in chunks:
+            parts += [f"### [B: {chunk.citation}]", chunk.text, ""]
     else:
         parts += [
-            "## KİTAP ALINTILARI",
-            "(Bu bölüm için kitapta eşleşen parça bulunamadı. "
-            "Yalnızca slayta dayan ve eksik kalan yerleri açıkça işaretle.)",
+            "## TEXTBOOK EXCERPTS",
+            "(No matching excerpt was found. Rely only on the slides and clearly mark missing support.)",
             "",
         ]
 
     if figures:
         parts += [
-            "## Kullanılabilir kitap şekilleri",
-            "(Gerekirse `[KŞEKİL: <numara>]` satırıyla çağır. Görüntüleri sana "
-            "gönderilmiyor — sistem çağırdığın numarayı kitaptan kırpıp koyacak.)",
+            "## Available textbook figures",
+            "(When useful, request a listed figure with `[BOOKFIGURE: <number>]`. The renderer will crop it from the book.)",
             "",
         ]
-        for f in figures:
-            desc = f.caption or "(altyazı çıkarılamadı)"
-            parts.append(f"- `{f.number}` — {desc} (s. {f.page})")
+        for figure in figures:
+            description = figure.caption or "(caption unavailable)"
+            parts.append(f"- `{figure.number}` — {description} (p. {figure.page})")
         parts.append("")
 
-    visual = [s.number for s in section.slides if s.is_visual]
+    visual = [slide.number for slide in section.slides if slide.is_visual]
     if visual:
         parts.append(
-            f"Not: {', '.join(str(n) for n in visual)} numaralı slaytların görüntüleri "
-            "yukarıda verildi. Şemalardaki bilgiyi metne dök."
+            f"Images for slides {', '.join(str(number) for number in visual)} were supplied above. Explain the information in their diagrams."
         )
 
-    parts += ["", "## Bu çıktı için ek talimatlar", ""]
+    parts += ["", "## Additional instructions for this output", ""]
     parts += build_output_directives(language, depth, extras or [])
     parts += [
         "",
-        "Yukarıdaki kurallara uyarak yaz. `## ` başlığıyla başla. "
-        "Sadece bu bölümü yaz, sonraki bölümlere geçme.",
+        "Follow all rules above. Begin with a `## ` heading and write only this section.",
     ]
     return "\n".join(parts)

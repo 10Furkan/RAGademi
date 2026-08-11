@@ -80,37 +80,37 @@ def test_the_three_sources_have_three_separate_jobs():
     Bu ayrım bozulursa model kâğıttaki konudan soru sormaya başlar ve
     öğrenciye sorumlu OLMADIĞI şeyi çalıştırır.
     """
-    assert "BİÇİMİ verir" in PRACTICE_SYSTEM
-    assert "KAPSAMI verir" in PRACTICE_SYSTEM
-    assert "DOĞRULUĞU verir" in PRACTICE_SYSTEM
-    assert "Kapsamı BELİRLEMEZ" in PRACTICE_SYSTEM
+    assert "PAST EXAM PAPER → FORMAT" in PRACTICE_SYSTEM
+    assert "LECTURE SLIDES → SCOPE" in PRACTICE_SYSTEM
+    assert "TEXTBOOK EXCERPTS → ACCURACY" in PRACTICE_SYSTEM
+    assert "does not define scope" in PRACTICE_SYSTEM
 
 
 def test_copying_the_past_question_is_forbidden():
     """Kullanıcının istediği şey 'benzer soru'; kopya zaten elinde."""
-    assert "KOPYALAMA YASAK" in PRACTICE_SYSTEM
-    assert "olduğu gibi sorma" in PRACTICE_SYSTEM
+    assert "DO NOT COPY" in PRACTICE_SYSTEM
+    assert "Never repeat a past question unchanged" in PRACTICE_SYSTEM
 
 
 def test_similarity_must_be_quotable_or_left_empty():
     """Atıf disiplininin sınav kâğıdına uygulanmışı: alıntılayamıyorsan iddia yok."""
-    assert "BİREBİR yaz" in PRACTICE_SYSTEM
-    assert "BOŞ bırak" in PRACTICE_SYSTEM
-    assert "uydurmak değildir" in PRACTICE_SYSTEM
+    assert "exact past question" in PRACTICE_SYSTEM
+    assert "Leave the field empty" in PRACTICE_SYSTEM
+    assert "never invent one" in PRACTICE_SYSTEM
 
 
 def test_distractors_come_from_typical_mistakes():
     """Rastgele çeldirici öğrenciye hiçbir şey öğretmez."""
-    assert "TİPİK BİR HATADAN" in PRACTICE_SYSTEM
+    assert "typical mistake" in PRACTICE_SYSTEM
 
 
 def test_request_carries_scope_format_and_truth():
     lec = make_lecture()
-    metin = build_practice_request(lec, "SORU 1: 0x9C nedir?", [make_chunk()], "Türkçe")
-    assert "Slayt 1: Bit Sıralaması" in metin  # kapsam
-    assert "SORU 1: 0x9C nedir?" in metin  # biçim
-    assert "[K: Integer Representations, s. 91-93]" in metin  # doğruluk
-    assert "Türkçe" in metin
+    metin = build_practice_request(lec, "QUESTION 1: What is 0x9C?", [make_chunk()], "English")
+    assert "Slide 1: Bit Sıralaması" in metin
+    assert "QUESTION 1: What is 0x9C?" in metin
+    assert "[B: Integer Representations, p. 91-93]" in metin
+    assert "English" in metin
     # Ajanda slaytı kapsam metnine girmez: içeriği yok, yalnızca başlık listesi.
     assert "ajanda" not in metin
 
@@ -119,10 +119,10 @@ def test_zero_count_means_as_many_as_the_paper_has():
     """Sabit soru sayısı dayatmak biçimi taklit etme işine ters düşer:
     4 soruluk bir finalin denemesi 20 soruyla yapılmaz."""
     lec = make_lecture()
-    serbest = build_practice_request(lec, "SORU 1", [], "Türkçe", count=0)
-    sabit = build_practice_request(lec, "SORU 1", [], "Türkçe", count=12)
-    assert "kaç soru varsa o kadar" in serbest
-    assert "Tam olarak 12 soru" in sabit
+    serbest = build_practice_request(lec, "QUESTION 1", [], "English", count=0)
+    sabit = build_practice_request(lec, "QUESTION 1", [], "English", count=12)
+    assert "same number of questions" in serbest
+    assert "exactly 12 questions" in sabit
 
 
 def test_schema_requires_the_grounding_fields():
@@ -162,7 +162,7 @@ def test_empty_prompts_are_dropped():
 def test_answer_key_comes_after_all_questions():
     """Çözüm sorunun altında olsaydı kâğıt denemelik olmaktan çıkardı."""
     md = to_markdown(make_exam(2))
-    anahtar = md.index("# Cevap anahtarı")
+    anahtar = md.index("# Answer key")
     assert md.index("Soru metni 2") < anahtar
     assert md.index("Adım adım çözüm.") > anahtar
 
@@ -175,7 +175,7 @@ def test_choices_are_lettered_by_the_system():
 def test_unquotable_question_gets_no_similarity_claim():
     """`modeled_on` boşsa 'örnek alınan soru' bloğu HİÇ basılmamalı."""
     md = to_markdown(make_exam(2))
-    assert md.count("::: sınav") == 1  # yalnızca alıntısı olan soru
+    assert md.count("::: exam") == 1
 
 
 # --- render ----------------------------------------------------------------
@@ -198,7 +198,7 @@ def test_html_renders_math_and_citations():
 def test_html_omits_the_source_block_when_nothing_can_be_quoted():
     exam = make_exam(1)
     exam.questions[0].modeled_on = ""
-    assert "Örnek alınan soru" not in practice_to_html(exam)
+    assert "Source question" not in practice_to_html(exam)
 
 
 def test_grounded_counts_only_quotable_questions():
@@ -229,7 +229,7 @@ def test_fake_client_builds_questions_from_the_real_sources():
     sınav metni okuma bozulursa demo koşusunda da görünsün."""
     lec = make_lecture()
     kagit = "1. What is the decimal value of the bit pattern 0x9C in 8 bits?"
-    payload = build_practice_request(lec, kagit, [make_chunk()], "Türkçe", count=2)
+    payload = build_practice_request(lec, kagit, [make_chunk()], "English", count=2)
     veri = FakeLLMClient().complete_json(
         system=PRACTICE_SYSTEM,
         content=[{"type": "text", "text": payload}],
@@ -238,7 +238,7 @@ def test_fake_client_builds_questions_from_the_real_sources():
     sorular = veri["questions"]
     assert len(sorular) == 2
     assert sorular[0]["topic"] == "Bit Sıralaması"
-    assert sorular[0]["citations"] == ["Integer Representations, s. 91-93"]
+    assert sorular[0]["citations"] == ["Integer Representations, p. 91-93"]
     assert "0x9C" in sorular[0]["modeled_on"]
 
 
@@ -275,7 +275,7 @@ def test_scanned_exam_without_text_is_refused_loudly(tmp_path):
 
     bos = tmp_path / "bos.pdf"
     bos.write_bytes(b"%PDF-1.4\n%%EOF\n")  # okunamayan kâğıt
-    with pytest.raises(PracticeError, match="metni okunamadı"):
+    with pytest.raises(PracticeError, match="text could not be extracted"):
         uret(
             PracticeInputs(
                 lecture_path=LECTURE_PDF, book_path=BOOK_PDF, exam_path=bos,

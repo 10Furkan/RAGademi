@@ -1,19 +1,4 @@
-"""Markdown → HTML.
-
-Üç özel işlem var:
-
-1. MATEMATİK. Ham `$...$` markdown'dan geçerse `_` vurgu, `*` italik olarak
-   yorumlanıp formül bozulur. `dollarmath` eklentisi matematiği önce yakalar ve
-   `\\(...\\)` / `\\[...\\]` sınırlayıcılarına çevirir; asıl render'ı tarayıcıda
-   KaTeX yapar.
-
-2. ATIFLAR. Model `[K: bölüm, s. 61]` ve `[S: 12]` işaretçileri bırakır; bunlar
-   kenar sütununa yerleşen chip'lere dönüştürülür. Atıf zinciri çıktının
-   doğrulanabilirliğini sağlayan şey, o yüzden görünür kalmalı.
-
-3. ŞEKİLLER. `[ŞEKİL: slayt 12]` işaretçisi orijinal slaytın render'ıyla
-   değiştirilir — model şemayı yeniden çizemez, ama nereye gerektiğini bilir.
-"""
+"""Markdown → HTML with math, source citations, and source figures."""
 
 from __future__ import annotations
 
@@ -33,23 +18,22 @@ from pygments.util import ClassNotFound
 from ..pdfio.figures import crop_figure
 from ..pdfio.render import render_pages
 
-_CITE_BOOK = re.compile(r"\[K:\s*([^\]]+?)\]")
+_CITE_BOOK = re.compile(r"\[(?:B|K):\s*([^\]]+?)\]")
 _CITE_SLIDE = re.compile(r"\[S:\s*(\d+(?:\s*,\s*\d+)*)\]")
-# `\s*$` yerine `[ \t]*$`: `\s` satır sonunu da yer, ardından gelen boş satır
-# kaybolur ve sonraki blok (ör. blockquote) figürün HTML bloğuna yapışıp
-# markdown olarak işlenmeden ham basılır.
+# Keep the following blank line; `\s*$` would consume it and merge blocks.
 _FIGURE = re.compile(
-    r"^[ \t]*\[ŞEKİL:\s*slayt\s*(\d+)\s*\][ \t]*$", re.IGNORECASE | re.MULTILINE
+    r"^[ \t]*\[(?:FIGURE:\s*slide|ŞEKİL:\s*slayt)\s*(\d+)\s*\][ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
 )
-# Kitap şekli. `[ \t]*$` gerekçesi yukarıdakiyle aynı: `\s*$` sonraki boş satırı
-# yiyor ve ardından gelen blok figürün HTML'ine yapışıyor.
+# Accept legacy Turkish markers in previously generated documents.
 _BOOK_FIGURE = re.compile(
-    r"^[ \t]*\[KŞEKİL:\s*([\d.]+?)\s*\][ \t]*$", re.IGNORECASE | re.MULTILINE
+    r"^[ \t]*\[(?:BOOKFIGURE|KŞEKİL):\s*([\d.]+?)\s*\][ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
 def _math_renderer(content: str, is_block: bool = False) -> str:
-    """Matematiği KaTeX auto-render'ın tanıyacağı sınırlayıcılarla bırakır."""
+    """Wrap math in delimiters recognized by KaTeX auto-render."""
     esc = html.escape(content)
     if is_block:
         return f'<div class="math-block">\\[{esc}\\]</div>'
@@ -57,13 +41,7 @@ def _math_renderer(content: str, is_block: bool = False) -> str:
 
 
 def _highlight_code(code: str, lang: str, _attrs) -> str:
-    """Fenced code bloğunu renklendirir.
-
-    Çıktı MUTLAKA `<pre` ile başlamalı: markdown-it, highlight fonksiyonunun
-    dönüşü `<pre` ile başlamıyorsa onu kendi `<pre><code>` sarmalayıcısına
-    koyar ve iç içe iki kod kutusu oluşur. Bu yüzden Pygments `nowrap=True`
-    ile yalnızca span'ları üretir, sarmalamayı burada biz yaparız.
-    """
+    """Highlight a fenced code block without creating nested wrappers."""
     try:
         lexer = get_lexer_by_name(lang) if lang else guess_lexer(code)
     except ClassNotFound:
@@ -74,13 +52,16 @@ def _highlight_code(code: str, lang: str, _attrs) -> str:
     return f'<pre class="code"><code>{inner}</code></pre>'
 
 
-# `::: soru … :::` blokları. Prompt Türkçe ad kullanıyor (proje sözleşmesi),
-# CSS sınıfı ASCII: sınıf adında ö/ü ile uğraşmaya değmez.
 _CALLOUTS = {
-    "analoji": ("callout-analogy", "Analoji"),
-    "soru": ("callout-quiz", "Kendini sına"),
-    "sözlük": ("callout-glossary", "Sözlük"),
-    "sınav": ("callout-exam", "Geçmiş sınavda"),
+    "analogy": ("callout-analogy", "Analogy"),
+    "quiz": ("callout-quiz", "Self-check"),
+    "glossary": ("callout-glossary", "Glossary"),
+    "exam": ("callout-exam", "From a past exam"),
+    # Legacy containers remain readable in existing generated Markdown.
+    "analoji": ("callout-analogy", "Analogy"),
+    "soru": ("callout-quiz", "Self-check"),
+    "sözlük": ("callout-glossary", "Glossary"),
+    "sınav": ("callout-exam", "From a past exam"),
 }
 
 
@@ -100,8 +81,7 @@ def make_parser() -> MarkdownIt:
         md.use(container_plugin, name=name, render=_callout_renderer(css_class, label))
     md.use(
         dollarmath_plugin,
-        # Sözleşme: renderer(content, {"display_mode": bool}). Anahtar adı
-        # "display_mode"; "display" yazmak her formülü satır içi yapar.
+        # The plugin contract names this option `display_mode`.
         renderer=lambda content, opts: _math_renderer(content, opts.get("display_mode", False)),
         allow_space=True,
         double_inline=True,
@@ -116,14 +96,14 @@ def pygments_css() -> str:
 def _figure_html(slide_no: int, data_uri: str) -> str:
     return (
         '<figure class="slide-figure">'
-        f'<img src="{data_uri}" alt="Slayt {slide_no}">'
-        f'<figcaption>Slayt {slide_no}</figcaption>'
+        f'<img src="{data_uri}" alt="Slide {slide_no}">'
+        f'<figcaption>Slide {slide_no}</figcaption>'
         "</figure>"
     )
 
 
 def insert_figures(markdown: str, lecture_pdf: str | Path, *, max_edge: int = 1100) -> str:
-    """`[ŞEKİL: slayt N]` işaretçilerini gerçek slayt görüntüsüyle değiştirir."""
+    """Replace slide-figure markers with rendered source slides."""
     wanted = [int(m.group(1)) for m in _FIGURE.finditer(markdown)]
     if not wanted:
         return markdown
@@ -134,16 +114,16 @@ def insert_figures(markdown: str, lecture_pdf: str | Path, *, max_edge: int = 11
         n = int(m.group(1))
         page = rendered.get(n)
         if page is None:
-            return f"> ⚠️ Slayt {n} görüntüsü bulunamadı."
+            return f"> ⚠️ The image for slide {n} could not be found."
         b64 = base64.standard_b64encode(page.png).decode("ascii")
-        # HTML bloğunun kendi başına durması için boş satırlarla çevrelenir.
+        # Blank lines keep the HTML as a standalone Markdown block.
         return "\n" + _figure_html(n, f"data:image/png;base64,{b64}") + "\n"
 
     return _FIGURE.sub(sub, markdown)
 
 
 def _citations_to_chips(html_text: str) -> str:
-    """Atıf işaretçilerini kenar sütunu chip'lerine çevirir."""
+    """Convert source markers into visible citation chips."""
 
     def book(m: re.Match) -> str:
         label = html.escape(m.group(1).strip())
@@ -151,27 +131,21 @@ def _citations_to_chips(html_text: str) -> str:
 
     def slide(m: re.Match) -> str:
         nums = m.group(1).replace(" ", "")
-        return f'<span class="cite cite-slide">Slayt {html.escape(nums)}</span>'
+        return f'<span class="cite cite-slide">Slide {html.escape(nums)}</span>'
 
     html_text = _CITE_BOOK.sub(book, html_text)
     return _CITE_SLIDE.sub(slide, html_text)
 
 
 def _book_figure_html(fig, data_uri: str) -> str:
-    """Kitap şekli + kaynak künyesi.
-
-    Künye kasıtlı olarak kısa: kitabın kendi altyazısı çoğu şekilde kırpımın
-    İÇİNDE zaten görünüyor, burada tekrarlamak aynı cümleyi iki kez basıyordu.
-    `caption` alanı modele "bu şekil neyi gösteriyor" demek için var, okuyucuya
-    değil.
-    """
+    """Render a textbook figure with a concise source label."""
     label = html.escape(fig.label)
     return (
         '<figure class="book-figure">'
         f'<img src="{data_uri}" alt="{html.escape(fig.caption or label)}">'
-        f'<figcaption><span class="src">Kitap</span>'
+        f'<figcaption><span class="src">Textbook</span>'
         f'<span class="ref" lang="en">{label}</span>'
-        f'<span class="pg">s. {fig.page}</span></figcaption>'
+        f'<span class="pg">p. {fig.page}</span></figcaption>'
         "</figure>"
     )
 
@@ -179,7 +153,7 @@ def _book_figure_html(fig, data_uri: str) -> str:
 def insert_book_figures(
     markdown: str, book_pdf: str | Path, figures, *, max_edge: int = 900
 ) -> str:
-    """`[KŞEKİL: N.M]` işaretçilerini kitaptan kırpılmış diyagramla değiştirir."""
+    """Replace textbook-figure markers with diagrams cropped from the source."""
     by_number = {f.number: f for f in figures}
     if not by_number:
         return strip_book_figure_markers(markdown)
@@ -190,9 +164,7 @@ def insert_book_figures(
         number = m.group(1).strip(".")
         fig = by_number.get(number)
         if fig is None:
-            # Model listede olmayan bir numara uydurmuş olabilir; sessizce
-            # yutma — okuyucuya eksik olduğunu söyle.
-            return f"\n<p class=\"figure-missing\">Kitap şekli {number} bulunamadı.</p>\n"
+            return f"\n<p class=\"figure-missing\">Textbook figure {number} could not be found.</p>\n"
         if number not in cache:
             png = crop_figure(book_pdf, fig, max_edge=max_edge)
             b64 = base64.standard_b64encode(png).decode("ascii")
@@ -203,28 +175,24 @@ def insert_book_figures(
 
 
 def strip_book_figure_markers(markdown: str) -> str:
-    """Kitap PDF'i yoksa işaretçiyi okunabilir bir nota çevirir."""
+    """Turn a marker into a readable note when the textbook PDF is unavailable."""
 
     def sub(m: re.Match) -> str:
         return (
-            f'\n<p class="figure-missing">Kitap şekli {m.group(1)} — '
-            "kitap PDF'i verilmediği için yerleştirilemedi.</p>\n"
+            f'\n<p class="figure-missing">Textbook figure {m.group(1)} — '
+            "could not be inserted because the textbook PDF was not provided.</p>\n"
         )
 
     return _BOOK_FIGURE.sub(sub, markdown)
 
 
 def strip_figure_markers(markdown: str) -> str:
-    """Ders PDF'i yokken işaretçiyi okunabilir bir nota çevirir.
-
-    Aksi halde `[ŞEKİL: slayt 22]` köşeli parantezleriyle ham metin olarak
-    okuyucunun önüne çıkıyor — sistemin iç işaretçisi çıktıya sızmamalı.
-    """
+    """Turn a marker into a readable note when the lecture PDF is unavailable."""
 
     def sub(m: re.Match) -> str:
         return (
-            f'\n<p class="figure-missing">Slayt {m.group(1)} görüntüsü — '
-            "ders PDF'i verilmediği için yerleştirilemedi.</p>\n"
+            f'\n<p class="figure-missing">Slide {m.group(1)} image — '
+            "could not be inserted because the lecture PDF was not provided.</p>\n"
         )
 
     return _FIGURE.sub(sub, markdown)
@@ -233,7 +201,9 @@ def strip_figure_markers(markdown: str) -> str:
 # Model atıf işaretçilerini bazen backtick'e alıyor (`[S: 3]`). O zaman
 # işaretçi <code> içine hapsoluyor ve chip stili kod kutusuyla çakışıyor.
 # İşaretçiler sistemin iç sözleşmesi; kod olarak gösterilmeleri gerekmiyor.
-_TICKED_MARKER = re.compile(r"`(\[(?:K|S|KŞEKİL|ŞEKİL):[^\]`]*\])`", re.IGNORECASE)
+_TICKED_MARKER = re.compile(
+    r"`(\[(?:B|K|S|BOOKFIGURE|KŞEKİL|FIGURE|ŞEKİL):[^\]`]*\])`", re.IGNORECASE
+)
 
 
 def markdown_to_html(
@@ -243,7 +213,7 @@ def markdown_to_html(
     book_pdf: str | Path | None = None,
     figures=(),
 ) -> str:
-    """Ders notu markdown'ını gövde HTML'ine çevirir."""
+    """Convert study-note Markdown into body HTML."""
     markdown = _TICKED_MARKER.sub(r"\1", markdown)
     markdown = (
         insert_figures(markdown, lecture_pdf) if lecture_pdf else strip_figure_markers(markdown)

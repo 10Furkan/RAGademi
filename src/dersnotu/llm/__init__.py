@@ -7,13 +7,16 @@ from .client import (
     cached,
     estimate_cost,
 )
+from .codex_client import CodexSubscriptionClient, CodexUnavailable
 from .factory import BACKENDS, backend_status, make_client, resolve_backend
 
 __all__ = [
     "LLMClient",
     "ClaudeCodeClient",
-    "last_rate_limit",
     "ClaudeCodeUnavailable",
+    "CodexSubscriptionClient",
+    "CodexUnavailable",
+    "last_rate_limit",
     "CallResult",
     "CredentialsMissing",
     "RefusalError",

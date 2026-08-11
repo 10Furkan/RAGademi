@@ -69,7 +69,7 @@ class PracticeInputs:
     # kullanıcıya hangi kâğıttan üretildiğini söylemez. Boşsa dosya adına
     # düşülür — CLI'da zaten gerçek ad odur.
     exam_name: str = ""
-    language: str = "Türkçe"
+    language: str = "English"
     # 0 = "geçmiş kâğıtta kaç soru varsa o kadar". Sabit bir sayı dayatmak
     # kâğıdın biçimini taklit etme işine ters düşer.
     count: int = 0
@@ -131,10 +131,10 @@ def generate(
         # Şablon yoksa "benzer soru" diye bir şey de yok. Sessizce kapsamdan
         # soru üretmek kullanıcının istediği şey değil.
         raise PracticeError(
-            "Sınav kâğıdının metni okunamadı. Taranmış (görüntü) bir PDF olabilir; "
-            "metin katmanı olan bir kopya gerekiyor."
+            "The exam paper text could not be extracted. It may be a scanned image; "
+            "a PDF with a text layer is required."
         )
-    progress("exam:loaded", f"{len(exam_text):,} karakter sınav metni")
+    progress("exam:loaded", f"{len(exam_text):,} characters of exam text")
 
     lecture = load_lecture(_pipeline_inputs(inputs), settings, progress)
     _, idx = load_book_index(_pipeline_inputs(inputs), settings, progress)
@@ -147,11 +147,11 @@ def generate(
     cards = build_topic_cards(llm, lecture, progress, language=inputs.language)
     chunks = collect_chunks(idx, cards)
     idx.close()
-    progress("retrieve:done", f"{len(chunks)} kitap alıntısı")
+    progress("retrieve:done", f"{len(chunks)} textbook excerpts")
 
     progress(
         "questions:start",
-        f"{inputs.count or 'kâğıttaki kadar'} soru, {len(lecture.slides)} slayt kapsamı",
+        f"{inputs.count or 'match paper'} questions, scope from {len(lecture.slides)} slides",
     )
     payload = build_practice_request(
         lecture, exam_text, chunks, inputs.language, count=inputs.count
@@ -166,20 +166,20 @@ def generate(
             model=settings.model,
         )
     except RefusalError as exc:
-        raise PracticeError(f"Model isteği reddetti: {exc.category}") from exc
+        raise PracticeError(f"The model request was rejected: {exc.category}") from exc
     except json.JSONDecodeError as exc:
         raise PracticeError(
-            "Model geçerli bir soru kâğıdı döndürmedi (JSON ayrıştırılamadı)."
+            "The model did not return a valid question paper (JSON parsing failed)."
         ) from exc
 
     questions = _to_questions(data if isinstance(data, dict) else {})
     if not questions:
-        raise PracticeError("Model hiç soru üretmedi; sınav kâğıdı boş kaldı.")
+        raise PracticeError("The model produced no questions; the practice exam is empty.")
 
     dayanakli = sum(1 for q in questions if q.modeled_on.strip())
     progress(
         "questions:done",
-        f"{len(questions)} soru · {dayanakli} tanesi geçmiş bir soruya dayanıyor",
+        f"{len(questions)} questions · {dayanakli} grounded in a past question",
     )
     return PracticeExam(
         lecture_title=lecture.title,
@@ -221,30 +221,30 @@ def to_markdown(exam: PracticeExam) -> str:
     Sıra kasıtlı: çözüm sorunun hemen altında olsaydı öğrenci soruyu çözmeden
     yanıtı görürdü ve kâğıt bir deneme olmaktan çıkıp okuma parçasına dönerdi.
     """
-    parts = [f"# {exam.lecture_title} — deneme sınavı", ""]
+    parts = [f"# {exam.lecture_title} — practice exam", ""]
     if exam.profile:
         parts += [f"> {exam.profile}", ""]
     for q in exam.questions:
-        parts += [f"## Soru {q.number}" + (f" ({q.points} puan)" if q.points else ""), ""]
+        parts += [f"## Question {q.number}" + (f" ({q.points} points)" if q.points else ""), ""]
         parts += [q.prompt, ""]
         if q.has_choices:
             for i, c in enumerate(q.choices):
                 parts.append(f"{_HARF[i] if i < len(_HARF) else i + 1}) {c}")
             parts.append("")
 
-    parts += ["", "# Cevap anahtarı", ""]
+    parts += ["", "# Answer key", ""]
     for q in exam.questions:
-        parts += [f"## Soru {q.number}", ""]
+        parts += [f"## Question {q.number}", ""]
         if q.answer:
-            parts += [f"**Yanıt:** {q.answer}", ""]
+            parts += [f"**Answer:** {q.answer}", ""]
         if q.solution:
             parts += [q.solution, ""]
         if q.citations:
-            parts += [" ".join(f"[K: {c}]" for c in q.citations), ""]
+            parts += [" ".join(f"[B: {c}]" for c in q.citations), ""]
         if q.modeled_on.strip():
             parts += [
-                "::: sınav",
-                f"**Örnek alınan soru:** {q.modeled_on.strip()}",
+                "::: exam",
+                f"**Source question:** {q.modeled_on.strip()}",
                 ":::",
                 "",
             ]

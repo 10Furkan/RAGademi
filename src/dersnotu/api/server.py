@@ -28,13 +28,23 @@ from ..library import KINDS, LibraryStore, Material, NotFound
 from ..llm import (
     BACKENDS,
     ClaudeCodeClient,
+    CodexSubscriptionClient,
     backend_status,
     last_rate_limit,
     make_client,
     resolve_backend,
 )
 from ..llm.client import LLMClient
-from ..llm.prompts import DEPTH_HELP, DEPTHS, EXTRA_HELP, EXTRAS
+from ..llm.prompts import (
+    DEPTH_HELP,
+    DEPTHS,
+    EXTRA_HELP,
+    EXTRAS,
+    LEGACY_DEPTHS,
+    LEGACY_EXTRAS,
+    normalize_depth,
+    normalize_extras,
+)
 from ..models import PracticeExam, StudyDocument
 from ..pdfio import sha256_file
 from ..pipeline import EXAM_CHAR_LIMIT, Inputs, retry_failed, run, save_debug, to_markdown
@@ -74,13 +84,18 @@ def _pick_backend(p: dict, emit) -> Any:
     backend = "demo" if p.get("demo") else resolve_backend(p.get("backend", "auto"))
     if backend == "api" and not LLMClient.credentials_available():
         raise RuntimeError(
-            "API anahtarı yok. ANTHROPIC_API_KEY ayarla, Claude Pro aboneliği "
-            "için 'Claude Pro' seçeneğini kullan, ya da demo modunu işaretle."
+            "No API key is configured. Set ANTHROPIC_API_KEY, select Claude Pro "
+            "for subscription access, or use demo mode."
         )
     if backend == "cli" and not ClaudeCodeClient.available():
         raise RuntimeError(
-            "`claude` komutu bulunamadı. Claude Code kurulu değil; "
-            "API anahtarı veya demo modunu kullan."
+            "The `claude` command was not found. Install Claude Code or use the "
+            "API-key, Codex, or demo backend."
+        )
+    if backend == "codex" and not CodexSubscriptionClient.available():
+        raise RuntimeError(
+            "No Codex subscription session was found. Run `codex login`, sign in "
+            "with your ChatGPT account, or select another backend."
         )
     emit(Event("backend", {"detail": backend}))
     return make_client(backend, settings)
@@ -93,7 +108,7 @@ def _inputs_for(job: Job) -> Inputs:
         lecture_path=Path(p["paths"]["lecture"]),
         book_path=Path(p["paths"]["book"]),
         language=p["language"],
-        depth=p.get("depth", "standart"),
+        depth=p.get("depth", "standard"),
         extras=p.get("extras", []),
         backend=p.get("backend", "auto"),
         exam_path=Path(sinav) if sinav else None,
@@ -126,7 +141,7 @@ def _publish(job: Job, doc: StudyDocument, emit) -> None:
     # belgenin içinde ama `@media print` ile PDF'te gizli.
     nav = ""
     if cid := job.params.get("course_id"):
-        nav = build_nav(f"/ders/{cid}", "Derse dön", f"/api/documents/{stem}/download")
+        nav = build_nav(f"/ders/{cid}", "Back to course", f"/api/documents/{stem}/download")
     html_path = out_base.with_suffix(".html")
     pdf_path = render_document(
         doc,
@@ -177,7 +192,7 @@ def _record(job: Job, doc: StudyDocument) -> None:
             doc_id,
             p["course_id"],
             [
-                (s.section_index, s.title or f"Bölüm {s.section_index + 1}", s.markdown)
+                (s.section_index, s.title or f"Section {s.section_index + 1}", s.markdown)
                 for s in doc.sections
                 if not s.error
             ],
@@ -250,7 +265,7 @@ def _publish_practice(job: Job, exam: PracticeExam, emit) -> None:
     emit(Event("render:start"))
     nav = ""
     if cid := job.params.get("course_id"):
-        nav = build_nav(f"/ders/{cid}", "Derse dön", f"/api/documents/{stem}/download")
+        nav = build_nav(f"/ders/{cid}", "Back to course", f"/api/documents/{stem}/download")
     html_path = out_base.with_suffix(".html")
     pdf_path = render_practice(
         exam, out_base.with_suffix(".pdf"), nav_html=nav, save_html=html_path
@@ -275,7 +290,7 @@ def _record_practice(job: Job, exam: PracticeExam) -> None:
             lecture_id=p.get("lecture_id"),
             book_id=p.get("book_id"),
             exam_id=p.get("exam_id"),
-            title=Path(p.get("lecture_name", "Deneme sınavı")).stem,
+            title=Path(p.get("lecture_name", "Practice exam")).stem,
             pdf_path=job.pdf_path,
             md_path=job.md_path,
             doc_path=job.doc_path,
@@ -392,9 +407,9 @@ async def upload_material(
 ) -> dict:
     _course_or_404(course_id)
     if kind not in KINDS:
-        raise HTTPException(400, f"Geçersiz tür: {kind}. Seçenekler: {', '.join(KINDS)}")
+        raise HTTPException(400, f"Invalid material type: {kind}. Options: {', '.join(KINDS)}")
     if not (file.filename or "").lower().endswith(".pdf"):
-        raise HTTPException(400, "Dosya PDF olmalı.")
+        raise HTTPException(400, "The file must be a PDF.")
 
     tmp = UPLOADS / f"up-{course_id}-{kind}.pdf"
     tmp.parent.mkdir(parents=True, exist_ok=True)
@@ -426,7 +441,7 @@ async def download_material(material_id: str) -> FileResponse:
     except NotFound as exc:
         raise HTTPException(404, str(exc)) from exc
     if not (mat.path and mat.path.exists()):
-        raise HTTPException(404, "Dosya diskte yok.")
+        raise HTTPException(404, "The file is missing from disk.")
     return FileResponse(mat.path, filename=mat.name, media_type="application/pdf")
 
 
@@ -438,7 +453,7 @@ async def download_document(document_id: str, fmt: str = "pdf") -> FileResponse:
         raise HTTPException(404, str(exc)) from exc
     path = doc.pdf_path if fmt == "pdf" else doc.md_path
     if not (path and path.exists()):
-        raise HTTPException(404, "Çıktı diskte yok.")
+        raise HTTPException(404, "The output is missing from disk.")
     ek = "deneme-sinavi" if doc.kind == "practice" else "ders-notu"
     return FileResponse(path, filename=f"{doc.title}-{ek}.{fmt}")
 
@@ -509,7 +524,7 @@ async def estimate_run(
     try:
         lec = _parsed_lecture(lec_mat)
     except Exception as exc:
-        raise HTTPException(400, f"Ders PDF'i okunamadı: {exc}") from exc
+        raise HTTPException(400, f"The lecture PDF could not be read: {exc}") from exc
 
     if mode == "practice":
         pp = project_practice(
@@ -550,11 +565,11 @@ async def read_document(course_id: str, document_id: str) -> str:
     except NotFound as exc:
         raise HTTPException(404, str(exc)) from exc
     if not (doc.html_path and doc.html_path.exists()):
-        ne = "deneme sınavının" if doc.kind == "practice" else "ders notunun"
+        ne = "practice exam" if doc.kind == "practice" else "study notes"
         raise HTTPException(
             404,
-            f"Bu {ne} okunabilir sürümü yok (eski bir koşudan kalmış). "
-            "PDF'i indirebilir ya da yeniden üretebilirsin.",
+            f"This {ne} has no readable HTML version because it came from an older run. "
+            "Download the PDF or generate it again.",
         )
     return doc.html_path.read_text(encoding="utf-8")
 
@@ -572,20 +587,20 @@ async def retry_document(document_id: str) -> dict:
     except NotFound as exc:
         raise HTTPException(404, str(exc)) from exc
     if not doc.failed:
-        raise HTTPException(400, "Bu dokümanda hatalı bölüm yok.")
+        raise HTTPException(400, "This document has no failed sections.")
     if not (doc.doc_path and doc.doc_path.exists()):
-        raise HTTPException(400, "Dokümanın ara dosyası diskte yok; yeniden denenemiyor.")
+        raise HTTPException(400, "The document state file is missing; it cannot be retried.")
 
     paths, ids = {}, {}
     for name, mid in (("lecture", doc.lecture_id), ("book", doc.book_id)):
         if not mid:
-            raise HTTPException(400, "Kaynak dosya silinmiş; yeniden denenemiyor.")
+            raise HTTPException(400, "A source file was deleted; the document cannot be retried.")
         try:
             mat = library.material(mid)
         except NotFound as exc:
-            raise HTTPException(400, "Kaynak dosya silinmiş; yeniden denenemiyor.") from exc
+            raise HTTPException(400, "A source file was deleted; the document cannot be retried.") from exc
         if not (mat.path and mat.path.exists()):
-            raise HTTPException(400, f"Kaynak dosya diskte yok: {mat.name}")
+            raise HTTPException(400, f"A source file is missing from disk: {mat.name}")
         paths[name] = str(mat.path)
         ids[f"{name}_id"] = mid
 
@@ -602,9 +617,9 @@ async def retry_document(document_id: str) -> dict:
             pass
 
     job = store.create({
-        "language": doc.language or "Türkçe",
+        "language": doc.language or "English",
         "backend": doc.backend or "auto",
-        "depth": doc.depth or "standart",
+        "depth": normalize_depth(doc.depth or "standard"),
         "extras": doc.extras,
         "course_id": doc.course_id,
         "lecture_name": doc.title,
@@ -650,19 +665,21 @@ async def create_job(
     # Geçmiş sınav kâğıdı: isteğe bağlı, yalnızca kitaplıktan seçilir.
     exam_id: str = Form(""),
     course_id: str = Form(""),
-    language: str = Form("Türkçe"),
+    language: str = Form("English"),
     backend: str = Form("auto"),
-    depth: str = Form("standart"),
+    depth: str = Form("standard"),
     # Çoklu seçim: aynı ad birden çok kez gönderilir (analoji, soru, ...).
     extras: list[str] = Form([]),
     demo: bool = Form(False),
 ) -> dict:
     if backend not in BACKENDS:
-        raise HTTPException(400, f"Geçersiz arka uç: {backend}. Seçenekler: {', '.join(BACKENDS)}")
-    if depth not in DEPTHS:
-        raise HTTPException(400, f"Geçersiz derinlik: {depth}. Seçenekler: {', '.join(DEPTHS)}")
-    if bad := [e for e in extras if e not in EXTRAS]:
-        raise HTTPException(400, f"Geçersiz açıklama biçimi: {', '.join(bad)}")
+        raise HTTPException(400, f"Invalid backend: {backend}. Options: {', '.join(BACKENDS)}")
+    if depth not in DEPTHS and depth not in LEGACY_DEPTHS:
+        raise HTTPException(400, f"Invalid depth: {depth}. Options: {', '.join(DEPTHS)}")
+    if bad := [e for e in extras if e not in EXTRAS and e not in LEGACY_EXTRAS]:
+        raise HTTPException(400, f"Invalid enhancement: {', '.join(bad)}")
+    depth = normalize_depth(depth)
+    extras = normalize_extras(extras)
     if course_id:
         _course_or_404(course_id)
 
@@ -709,7 +726,7 @@ async def create_job(
                 job.params[f"{name}_id"] = mat.id
                 paths[name] = str(mat.path)
         else:
-            raise HTTPException(400, f"Kaynak eksik: {name}. Dosya yükle veya seç.")
+            raise HTTPException(400, f"Missing source: {name}. Upload or select a file.")
 
     if exam_id:
         exam = _material_for("exam", exam_id, course_id)
@@ -730,13 +747,13 @@ def _material_for(kind: str, material_id: str, course_id: str) -> Material:
     try:
         mat = library.material(material_id)
     except NotFound as exc:
-        raise HTTPException(404, f"Materyal bulunamadı: {material_id}") from exc
+        raise HTTPException(404, f"Material not found: {material_id}") from exc
     if mat.kind != kind:
-        raise HTTPException(400, f"{material_id} bir {kind} değil.")
+        raise HTTPException(400, f"{material_id} is not a {kind} material.")
     if course_id and mat.course_id != course_id:
-        raise HTTPException(400, "Materyal bu derse ait değil.")
+        raise HTTPException(400, "The material does not belong to this course.")
     if not (mat.path and mat.path.exists()):
-        raise HTTPException(400, f"Dosya diskte yok: {mat.name}")
+        raise HTTPException(400, f"The file is missing from disk: {mat.name}")
     return mat
 
 
@@ -747,16 +764,16 @@ async def create_practice_job(
     # Ders notunda sınav kâğıdı isteğe bağlıydı; burada ŞABLON o, zorunlu.
     exam_id: str = Form(...),
     course_id: str = Form(""),
-    language: str = Form("Türkçe"),
+    language: str = Form("English"),
     backend: str = Form("auto"),
     # 0 = geçmiş kâğıtta kaç soru varsa o kadar.
     count: int = Form(0),
     demo: bool = Form(False),
 ) -> dict:
     if backend not in BACKENDS:
-        raise HTTPException(400, f"Geçersiz arka uç: {backend}. Seçenekler: {', '.join(BACKENDS)}")
+        raise HTTPException(400, f"Invalid backend: {backend}. Options: {', '.join(BACKENDS)}")
     if not 0 <= count <= 40:
-        raise HTTPException(400, "Soru sayısı 0-40 arasında olmalı (0 = kâğıttaki kadar).")
+        raise HTTPException(400, "Question count must be between 0 and 40 (0 matches the paper).")
     if course_id:
         _course_or_404(course_id)
 
@@ -789,14 +806,14 @@ async def retry_job(job_id: str) -> dict:
     """Hatalı bölümleri yeniden üretir. Başarılı bölümler yeniden çağrılmaz."""
     src = store.get(job_id)
     if src is None:
-        raise HTTPException(404, "İş bulunamadı.")
+        raise HTTPException(404, "Job not found.")
     if src.status not in (JobStatus.DONE, JobStatus.FAILED):
-        raise HTTPException(409, "İş hâlâ çalışıyor; bitmesini bekle.")
+        raise HTTPException(409, "The job is still running; wait for it to finish.")
     if not src.failed_sections:
-        raise HTTPException(400, "Bu işte hatalı bölüm yok.")
+        raise HTTPException(400, "This job has no failed sections.")
     if not (src.doc_path and src.doc_path.exists()):
         raise HTTPException(
-            400, "Bu işin dokümanı diskte yok; yeniden deneme yapılamıyor."
+            400, "The job document is missing from disk and cannot be retried."
         )
 
     job = store.create({**src.params, "source_doc": str(src.doc_path), "retry_of": src.id})
@@ -813,7 +830,7 @@ async def list_jobs() -> list[dict]:
 async def get_job(job_id: str) -> dict:
     job = store.get(job_id)
     if job is None:
-        raise HTTPException(404, "İş bulunamadı.")
+        raise HTTPException(404, "Job not found.")
     return {**job.to_dict(), "events": [e.to_dict() for e in job.events]}
 
 
@@ -821,7 +838,7 @@ async def get_job(job_id: str) -> dict:
 async def stream_events(job_id: str) -> StreamingResponse:
     job = store.get(job_id)
     if job is None:
-        raise HTTPException(404, "İş bulunamadı.")
+        raise HTTPException(404, "Job not found.")
 
     queue = store.subscribe(job_id)
 
@@ -856,10 +873,10 @@ async def stream_events(job_id: str) -> StreamingResponse:
 async def download(job_id: str, fmt: str = "pdf") -> FileResponse:
     job = store.get(job_id)
     if job is None:
-        raise HTTPException(404, "İş bulunamadı.")
+        raise HTTPException(404, "Job not found.")
     path = job.pdf_path if fmt == "pdf" else job.md_path
     if not path or not path.exists():
-        raise HTTPException(404, "Çıktı henüz hazır değil.")
+        raise HTTPException(404, "The output is not ready yet.")
     stem = Path(job.params.get("lecture_name", "ders-notu")).stem
     return FileResponse(path, filename=f"{stem}-ders-notu.{fmt}")
 
@@ -877,7 +894,7 @@ async def health() -> dict:
         # değişip açıklama olduğu yerde kalırsa arayüz yalan söyler.
         "depth_help": DEPTH_HELP,
         "extra_help": EXTRA_HELP,
-        # Hangi kimlik yolları kullanılabilir (API anahtarı / Claude Pro / demo).
+        # Hangi kimlik yolları kullanılabilir (API anahtarı / Claude Pro / Codex / demo).
         "backends": backend_status(),
     }
 
@@ -896,7 +913,7 @@ if STATIC.exists():
 def _page(name: str) -> str:
     page = STATIC / name
     if not page.exists():
-        return "<h1>dersnotu</h1><p>Arayüz dosyası bulunamadı.</p>"
+        return "<h1>RAGademi</h1><p>The interface file could not be found.</p>"
     return page.read_text(encoding="utf-8")
 
 

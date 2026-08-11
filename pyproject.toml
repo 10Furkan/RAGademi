@@ -1,7 +1,7 @@
 [project]
 name = "dersnotu"
 version = "0.1.0"
-description = "Ders slaytlarını kitapla besleyip anlaşılır, detaylı ders notu PDF'ine dönüştürür"
+description = "Turns lecture slides and textbooks into clear, detailed, source-grounded study notes"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.69",
@@ -12,12 +12,12 @@ dependencies = [
     "pydantic-settings>=2.6",
     "typer>=0.15",
     "rich>=13.9",
-    # Render hattı: Markdown → HTML → PDF
+    # Rendering pipeline: Markdown → HTML → PDF
     "markdown-it-py>=3",
     "mdit-py-plugins>=0.4",
     "pygments>=2.18",
     "playwright>=1.49",
-    # Web arayüzü + API
+    # Web interface + API
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "python-multipart>=0.0.12",
@@ -42,7 +42,7 @@ packages = ["src/dersnotu"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-markers = ["slow: gerçek PDF okur / Chromium çalıştırır"]
+markers = ["slow: reads real PDFs or launches Chromium"]
 
 [tool.ruff]
 line-length = 100
@@ -50,5 +50,5 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-# B008: typer'ın standart deyimi argüman varsayılanında fonksiyon çağırmaktır.
+# B008: Typer's standard pattern calls functions in argument defaults.
 ignore = ["E501", "B008"]

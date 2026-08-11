@@ -35,7 +35,7 @@ from .pdfio.render import render_pages
 # Geçmiş koşu yoksa kullanılan kaba tahminler (saniye/bölüm). `cli` ölçüldü
 # (tek gerçek bölüm: 189 sn); `api` akış hızından kabaca; `demo` anlıktır.
 # Bunlar yalnızca ilk koşu için geçerli — sonrası kendi geçmişinden öğrenir.
-FALLBACK_SECONDS = {"api": 30.0, "cli": 190.0, "demo": 1.0}
+FALLBACK_SECONDS = {"api": 30.0, "cli": 190.0, "codex": 190.0, "demo": 1.0}
 
 # Bölüm başına beklenen çıktı (~2000 kelime).
 _OUTPUT_PER_SECTION = 3000
@@ -65,7 +65,7 @@ class Projection:
     cost: float
     no_cache_cost: float
     seconds: float
-    seconds_source: str  # "geçmiş" | "tahmin"
+    seconds_source: str  # "history" | "estimate"
     book_indexed: bool
     index_seconds: float = 0.0
     sample: dict = field(default_factory=dict)
@@ -110,8 +110,8 @@ def seconds_per_section(backend: str, history: list[float] | None = None) -> tup
     ortalamayı savurur ama medyanı kıpırdatmaz.
     """
     if history:
-        return statistics.median(history), "geçmiş"
-    return FALLBACK_SECONDS.get(backend, FALLBACK_SECONDS["api"]), "tahmin"
+        return statistics.median(history), "history"
+    return FALLBACK_SECONDS.get(backend, FALLBACK_SECONDS["api"]), "estimate"
 
 
 # --- Deneme sınavı ---------------------------------------------------------
@@ -123,7 +123,7 @@ _ASSUMED_QUESTIONS = 8
 # Geçmiş koşu yokken tek çağrılık üretimin kaba süresi. `api` ölçekli bir
 # çağrı ders notunun bir bölümünden uzun (çıktı daha büyük), `cli` yine bir
 # abonelik turu. Konu kartları çağrısı da bunun içinde.
-FALLBACK_PRACTICE_SECONDS = {"api": 75.0, "cli": 260.0, "demo": 2.0}
+FALLBACK_PRACTICE_SECONDS = {"api": 75.0, "cli": 260.0, "codex": 260.0, "demo": 2.0}
 
 
 @dataclass
@@ -185,7 +185,11 @@ def project_practice(
     ama çıktı büyüklüğüyle birlikte büyüdüğü için doğru yönde: 20 soruluk bir
     kâğıt 5 soruluktan uzun sürer.
     """
-    model = model or settings.model
+    model = (
+        (settings.codex_model or "Codex CLI default")
+        if backend == "codex"
+        else (model or settings.model)
+    )
     soru = count if count > 0 else _ASSUMED_QUESTIONS
 
     # İstek gövdesi: sistem promptu + slayt metinleri + sınav kâğıdı + alıntılar.
@@ -228,15 +232,15 @@ def project_practice(
         + cheap_input * cheap_in
         + cheap_output * cheap_out
     ) / 1_000_000
-    if backend in ("cli", "demo"):
+    if backend in ("cli", "codex", "demo"):
         cost = 0.0  # abonelik kotası harcanır, para değil
 
     if history:
-        per, source = statistics.median(history), "geçmiş"
+        per, source = statistics.median(history), "history"
         seconds = per * soru
     else:
         seconds = FALLBACK_PRACTICE_SECONDS.get(backend, FALLBACK_PRACTICE_SECONDS["api"])
-        source = "tahmin"
+        source = "estimate"
 
     return PracticeProjection(
         model=model,
@@ -271,7 +275,11 @@ def project(
     düşer ve `book_indexed=False` ile bunu söyler — ilk koşuda indeksleme
     süresi de eklenir, çünkü kullanıcının bekleyeceği süre odur.
     """
-    model = model or settings.model
+    model = (
+        (settings.codex_model or "Codex CLI default")
+        if backend == "codex"
+        else (model or settings.model)
+    )
     n_sections = len(lecture.sections)
     if limit_sections:
         n_sections = min(n_sections, limit_sections)
@@ -350,7 +358,7 @@ def project(
     ) / 1_000_000
 
     # Abonelik yolunda token ücreti yok: kota harcanır, para değil.
-    if backend == "cli":
+    if backend in ("cli", "codex"):
         cost = 0.0
     elif backend == "demo":
         cost = no_cache_cost = 0.0

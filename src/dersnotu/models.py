@@ -22,7 +22,7 @@ class Slide(BaseModel):
 
     @property
     def label(self) -> str:
-        return f"Slayt {self.number}: {self.title}" if self.title else f"Slayt {self.number}"
+        return f"Slide {self.number}: {self.title}" if self.title else f"Slide {self.number}"
 
 
 class LectureSection(BaseModel):
@@ -73,9 +73,9 @@ class BookChunk(BaseModel):
     @property
     def citation(self) -> str:
         pages = (
-            f"s. {self.page_start}"
+            f"p. {self.page_start}"
             if self.page_start == self.page_end
-            else f"s. {self.page_start}-{self.page_end}"
+            else f"p. {self.page_start}-{self.page_end}"
         )
         return f"{self.section_title}, {pages}" if self.section_title else pages
 
@@ -169,7 +169,7 @@ class PracticeQuestion(BaseModel):
     """
 
     number: int
-    kind: str = ""  # çoktan seçmeli | hesaplama | doğru-yanlış | açık uçlu | kod okuma
+    kind: str = ""  # multiple choice | calculation | true/false | open-ended | code reading
     points: int = 0
     topic: str = ""
     # Sorunun dayandığı slaytlar — kapsam kanıtı. Boş liste, soruyu kapsam
@@ -233,7 +233,7 @@ class StudyDocument(BaseModel):
     # başarılı bölümlerle tutarsız bir kart üretebilirdi.
     cards: list[TopicCard] = Field(default_factory=list)
     alignments: list[SectionAlignment] = Field(default_factory=list)
-    depth: str = "standart"
+    depth: str = "standard"
     extras: list[str] = Field(default_factory=list)
 
     @property

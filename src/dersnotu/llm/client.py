@@ -48,7 +48,7 @@ class RefusalError(RuntimeError):
     def __init__(self, category: str | None, explanation: str | None):
         self.category = category
         self.explanation = explanation
-        super().__init__(f"Model isteği reddetti (kategori={category}): {explanation}")
+        super().__init__(f"Model request rejected (category={category}): {explanation}")
 
 
 @dataclass

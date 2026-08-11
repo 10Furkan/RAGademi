@@ -55,27 +55,27 @@ def test_section_request_carries_citations():
     lec = make_lecture()
     chunk = BookChunk(
         chunk_id="c1",
-        text="içerik",
+        text="content",
         section_title="Information Storage",
         page_start=70,
         page_end=72,
         token_estimate=5,
     )
-    card = TopicCard(section_index=0, title="Bayt Sıralaması", gaps=["endianness"])
-    text = build_section_request(lec.sections[0], card, [chunk], "Türkçe")
+    card = TopicCard(section_index=0, title="Byte Ordering", gaps=["endianness"])
+    text = build_section_request(lec.sections[0], card, [chunk], "English")
 
-    assert "[K: Information Storage, s. 70-72]" in text
+    assert "[B: Information Storage, p. 70-72]" in text
     assert "endianness" in text
-    assert "Türkçe" in text
+    assert "English" in text
     # Görsel slayt numarası modele bildirilmeli.
     assert "2" in text
 
 
 def test_section_request_flags_missing_book_context():
     lec = make_lecture()
-    card = TopicCard(section_index=0, title="Konu")
-    text = build_section_request(lec.sections[0], card, [], "Türkçe")
-    assert "eşleşen parça bulunamadı" in text
+    card = TopicCard(section_index=0, title="Topic")
+    text = build_section_request(lec.sections[0], card, [], "English")
+    assert "No matching excerpt was found" in text
 
 
 def test_failed_section_becomes_visible_warning_not_silent_gap():

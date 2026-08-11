@@ -12,7 +12,12 @@ import json
 
 import pytest
 
-from dersnotu.llm import BACKENDS, ClaudeCodeClient, resolve_backend
+from dersnotu.llm import (
+    BACKENDS,
+    ClaudeCodeClient,
+    CodexSubscriptionClient,
+    resolve_backend,
+)
 from dersnotu.llm.cli_client import _SLIM_FLAGS, _strip_cache_control
 from dersnotu.llm.factory import make_client
 
@@ -22,6 +27,7 @@ class Ayarlar:
     cheap_model = "claude-haiku-4-5"
     effort = "high"
     max_tokens = 16000
+    codex_model = ""
 
 
 # --- Seçim ---------------------------------------------------------------
@@ -31,7 +37,7 @@ def test_demo_backend_needs_no_credentials():
 
 
 def test_unknown_backend_is_rejected():
-    with pytest.raises(ValueError, match="Bilinmeyen arka uç"):
+    with pytest.raises(ValueError, match="Unknown backend"):
         make_client("gpt", Ayarlar())
 
 
@@ -42,6 +48,10 @@ def test_auto_falls_back_to_demo_when_nothing_available(monkeypatch):
     )
     monkeypatch.setattr(
         "dersnotu.llm.factory.ClaudeCodeClient.available", staticmethod(lambda *_: False)
+    )
+    monkeypatch.setattr(
+        "dersnotu.llm.factory.CodexSubscriptionClient.available",
+        staticmethod(lambda *_: False),
     )
     assert resolve_backend("auto") == "demo"
 
@@ -69,7 +79,7 @@ def test_explicit_backend_is_not_overridden(monkeypatch):
 
 
 def test_backend_names_are_stable():
-    assert BACKENDS == ("auto", "api", "cli", "demo")
+    assert BACKENDS == ("auto", "api", "cli", "codex", "demo")
 
 
 # --- CLI istemcisinin sözleşmeleri ---------------------------------------
@@ -225,7 +235,7 @@ def test_complete_json_reports_empty_structured_output(monkeypatch):
     monkeypatch.setattr(
         c, "complete", lambda **kw: CallResult(text="  ", stop_reason="max_tokens")
     )
-    with pytest.raises(RuntimeError, match="yapılandırılmış çıktı döndürmedi"):
+    with pytest.raises(RuntimeError, match="did not return structured output"):
         c.complete_json(system="s", content=[], schema={})
 
 
@@ -246,3 +256,24 @@ def test_garbage_lines_are_skipped():
     c = _client()
     bozuk = "bu json degil\n" + _ndjson(_delta("iyi"), _result("x"))
     assert c._parse(bozuk, None).text == "iyi"
+
+
+def test_auto_uses_codex_after_claude(monkeypatch):
+    monkeypatch.setattr(
+        "dersnotu.llm.factory.LLMClient.credentials_available", staticmethod(lambda: False)
+    )
+    monkeypatch.setattr(
+        "dersnotu.llm.factory.ClaudeCodeClient.available", staticmethod(lambda *_: False)
+    )
+    monkeypatch.setattr(
+        "dersnotu.llm.factory.CodexSubscriptionClient.available", staticmethod(lambda *_: True)
+    )
+    assert resolve_backend("auto") == "codex"
+
+
+def test_codex_backend_builds_subscription_client(monkeypatch):
+    monkeypatch.setattr(
+        "dersnotu.llm.factory.CodexSubscriptionClient.__init__",
+        lambda self, **kwargs: None,
+    )
+    assert isinstance(make_client("codex", Ayarlar()), CodexSubscriptionClient)

@@ -95,8 +95,8 @@ class ClaudeCodeClient:
         exe = shutil.which(executable)
         if exe is None:
             raise ClaudeCodeUnavailable(
-                "`claude` komutu bulunamadı. Claude Code kurulu mu? "
-                "Kurulum: https://claude.com/claude-code"
+                "The `claude` command was not found. Install Claude Code from "
+                "https://claude.com/claude-code"
             )
         self.executable = exe
 
@@ -196,11 +196,11 @@ class ClaudeCodeClient:
                 encoding="utf-8-sig", timeout=self.timeout, env=env,
             )
         except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(f"claude CLI {self.timeout}s içinde yanıt vermedi") from exc
+            raise RuntimeError(f"Claude CLI did not respond within {self.timeout}s") from exc
 
         if proc.returncode != 0:
             raise RuntimeError(
-                f"claude CLI hata verdi (rc={proc.returncode}): "
+                f"Claude CLI failed (rc={proc.returncode}): "
                 f"{(proc.stderr or proc.stdout or '')[:600]}"
             )
 
@@ -239,7 +239,7 @@ class ClaudeCodeClient:
                 result_ev = ev
 
         if result_ev is None:
-            raise RuntimeError("claude CLI `result` olayı döndürmedi")
+            raise RuntimeError("Claude CLI did not return a `result` event")
 
         if result_ev.get("is_error"):
             raise RuntimeError(f"claude CLI: {str(result_ev.get('result'))[:400]}")
@@ -278,8 +278,8 @@ class ClaudeCodeClient:
         text = (result.text or "").strip()
         if not text:
             raise RuntimeError(
-                "claude CLI yapılandırılmış çıktı döndürmedi "
-                f"(stop_reason={result.stop_reason}). Şema çok mu karmaşık?"
+                "Claude CLI did not return structured output "
+                f"(stop_reason={result.stop_reason}). The schema may be too complex."
             )
         try:
             return json.loads(text)

@@ -30,7 +30,7 @@ def test_exam_text_lands_in_the_cached_prefix():
     lec = make_lecture()
     onek = build_cached_prefix(lec, "", "SORU 1: İkinin tümleyeni nedir?")[0]["text"]
     assert "SORU 1: İkinin tümleyeni nedir?" in onek
-    assert "GEÇMİŞ SINAV SORULARI" in onek
+    assert "PAST EXAM QUESTIONS" in onek
 
 
 def test_prefix_without_exam_is_unchanged():
@@ -55,9 +55,9 @@ def test_exam_rule_stays_out_of_the_system_prompt():
 
 def test_exam_rule_forbids_unsupported_claims():
     """Projenin atıf disiplini burada da geçerli: alıntılayamıyorsan iddia yok."""
-    assert "birebir alıntıla" in EXAM_RULE
-    assert "KAPSAM GENİŞLETMEK için kullanma" in EXAM_RULE
-    assert "HİÇ yazma" in EXAM_RULE
+    assert "quote the question verbatim" in EXAM_RULE
+    assert "never to expand scope" in EXAM_RULE
+    assert "do not create this block" in EXAM_RULE
 
 
 # --- metin okuma ----------------------------------------------------------
@@ -86,7 +86,7 @@ def test_exam_callout_renders():
         "::: sınav\n**Sorulmuş:** 0xCA baytını ikiliye çevirin.\n\nÇözüm.\n:::"
     )
     assert "callout-exam" in html
-    assert "Geçmiş sınavda" in html
+    assert "From a past exam" in html
     assert "0xCA" in html
 
 

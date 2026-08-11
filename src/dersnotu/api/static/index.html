@@ -1,25 +1,24 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dersnotu — derslerim</title>
+<title>RAGademi — My Courses</title>
 <link rel="stylesheet" href="/static/app.css">
 <style>
-/* Ana sayfa tek sütun: burada bir iş çalışmıyor, ilerleme rayı yok. */
+/* The home page is single-column: no job or progress rail runs here. */
 main{display:block;padding:32px 0 90px}
 
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:16px}
 
-/* Ders kartı bir fiş: üstte künye (kod), altta ad, en altta sayım.
-   Kart tıklanınca derse girilir; silme ayrı bir düğme çünkü aynı kartın
-   içinde iki farklı sonuç olan tek bir tıklama alanı olmamalı. */
+/* A course card is a compact record: code, name, then item counts.
+   Opening and deleting remain separate actions. */
 .card{position:relative;display:flex;flex-direction:column;min-height:158px;
       background:var(--surface);border:1px solid var(--rule);border-radius:5px;
       padding:18px 20px 16px;text-decoration:none;color:inherit;
       transition:border-color .15s,transform .15s}
 .card:hover{border-color:var(--ink);transform:translateY(-1px)}
-/* Künye satırı: kod varsa .kod etiketi (app.css), yoksa sade "ders" yazısı. */
+/* Show the .kod badge when a code exists; otherwise show a plain label. */
 .card .code{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;
       text-transform:uppercase;color:var(--muted);margin-bottom:10px;
       min-height:20px}
@@ -36,8 +35,7 @@ main{display:block;padding:32px 0 90px}
 .card:hover .x,.card .x:focus-visible{opacity:1}
 .card .x:hover{color:var(--danger);background:var(--paper)}
 
-/* Yeni ders kartı listenin parçası, ayrı bir bölge değil: "ders eklemek"
-   de derslerden biri gibi görünsün. */
+/* The new-course action belongs in the card grid. */
 .new{border-style:dashed;justify-content:center;align-items:center;color:var(--muted);
      font-size:14px;background:transparent;cursor:pointer;width:100%;font-weight:400;
      min-height:158px;border-width:1.5px;border-color:var(--rule);border-radius:5px;
@@ -57,15 +55,15 @@ dialog .foot button{padding:11px 20px;font-size:14px}
 <body>
 <div class="wrap">
   <header>
-    <div class="eyebrow">dersnotu</div>
-    <h1>Slaytlar üç madde. Kitap bin sayfa. <span class="hl">Arası boş.</span></h1>
-    <p class="lede">Her ders için slaytlarını ve kitabını bir kez yükle. Sistem
-       slaytın kapsamını korur, açıklamayı kitaptan çeker ve her iddiaya kaynak koyar.</p>
+    <div class="eyebrow">RAGademi</div>
+    <h1>Three bullets on a slide. A thousand pages in a book. <span class="hl">Bridge the gap.</span></h1>
+    <p class="lede">Upload each course's slides and textbook once. The system preserves
+       the lecture scope, draws explanations from the book, and grounds every claim.</p>
   </header>
 
   <main>
     <div class="panel-head" style="margin-bottom:18px">
-      <h2 style="font-size:17px;margin:0;font-weight:600">Derslerim</h2>
+      <h2 style="font-size:17px;margin:0;font-weight:600">My Courses</h2>
       <span class="lab" id="say" style="margin:0"></span>
     </div>
     <div class="cards" id="cards"></div>
@@ -74,25 +72,25 @@ dialog .foot button{padding:11px 20px;font-size:14px}
 
 <dialog id="dlg">
   <form method="dialog" id="newform">
-    <h2>Yeni ders</h2>
+    <h2>New Course</h2>
     <div class="field">
-      <span class="lab">Ders adı</span>
+      <span class="lab">Course name</span>
       <input type="text" name="name" required maxlength="120"
-             placeholder="Bilgisayar Sistemlerine Giriş" autocomplete="off">
+             placeholder="Introduction to Computer Systems" autocomplete="off">
     </div>
     <div class="field">
-      <span class="lab">Ders kodu</span>
-      <input type="text" name="code" maxlength="24" placeholder="BLG 212" autocomplete="off">
-      <p class="hint">İsteğe bağlı. Listede künye olarak görünür.</p>
+      <span class="lab">Course code</span>
+      <input type="text" name="code" maxlength="24" placeholder="CSE 212" autocomplete="off">
+      <p class="hint">Optional. Displayed as the course identifier.</p>
     </div>
     <div class="field">
-      <span class="lab">Not</span>
-      <input type="text" name="note" maxlength="200" placeholder="2. sınıf güz dönemi"
+      <span class="lab">Note</span>
+      <input type="text" name="note" maxlength="200" placeholder="Second year, fall semester"
              autocomplete="off">
     </div>
     <div class="foot">
-      <button type="button" class="ghost" id="iptal">Vazgeç</button>
-      <button type="submit" id="olustur">Dersi oluştur</button>
+      <button type="button" class="ghost" id="iptal">Cancel</button>
+      <button type="submit" id="olustur">Create course</button>
     </div>
   </form>
 </dialog>
@@ -106,20 +104,17 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g,
 
 function cardHTML(c){
   const n = c.counts;
-  const kunye = c.code ? `<span class="kod">${esc(c.code)}</span>` : "ders";
-  // Sıfır sayımı göstermek yeni bir dersi "boş" diye damgalar; onun yerine
-  // ne yapılacağını söyle.
+  const kunye = c.code ? `<span class="kod">${esc(c.code)}</span>` : "course";
+  // For a new course, explain the next action instead of displaying zeroes.
   const sayim = (n.lectures + n.books + n.documents) === 0
-    ? "henüz dosya yok"
-    : [n.lectures && `<b>${n.lectures}</b> slayt`,
-       n.books && `<b>${n.books}</b> kitap`,
-       n.notes && `<b>${n.notes}</b> ders notu`,
-       // Yalnızca varsa görünür: hiç deneme üretmemiş bir derste "0 deneme"
-       // yazmak kartı boş bir sayıyla doldurmak olurdu.
-       n.practices && `<b>${n.practices}</b> deneme`].filter(Boolean).join(" · ");
+    ? "no files yet"
+    : [n.lectures && `<b>${n.lectures}</b> slide deck`,
+       n.books && `<b>${n.books}</b> textbook`,
+       n.notes && `<b>${n.notes}</b> study note`,
+       n.practices && `<b>${n.practices}</b> practice exam`].filter(Boolean).join(" · ");
   return `<a class="card" href="/ders/${c.id}">
     <button class="x" type="button" data-del="${c.id}" data-name="${esc(c.name)}"
-            title="Dersi sil" aria-label="Dersi sil">×</button>
+            title="Delete course" aria-label="Delete course">×</button>
     <div class="code">${kunye}</div>
     <h3 class="nm">${esc(c.name)}</h3>
     ${c.note ? `<p class="note">${esc(c.note)}</p>` : ""}
@@ -128,9 +123,9 @@ function cardHTML(c){
 }
 
 function ciz(list){
-  $("#say").textContent = list.length ? `${list.length} ders` : "";
+  $("#say").textContent = list.length ? `${list.length} course${list.length === 1 ? "" : "s"}` : "";
   cardsEl.innerHTML = list.map(cardHTML).join("")
-    + `<button class="new" id="yeni">+ Yeni ders</button>`;
+    + `<button class="new" id="yeni">+ New course</button>`;
   $("#yeni").addEventListener("click", () => {
     $("#newform").reset(); dlg.showModal();
   });
@@ -138,10 +133,8 @@ function ciz(list){
     b.addEventListener("click", sil);
 }
 
-// Sayfa her istekte diskten okunuyor, uçlar ise süreçte donmuş durumda.
-// Yani ESKİ bir sunucu YENİ bir sayfayı sunabiliyor — ucu bulamayan istemci
-// hiçbir şey çizmezse geriye bomboş bir ekran kalır ve kullanıcı neyin
-// bozulduğunu bilemez. Sessiz başarısızlık burada yasak.
+// Static files can be newer than a running server process, so fail visibly when
+// the expected API endpoints are unavailable.
 function hata(baslik, ipucu){
   $("#say").textContent = "";
   cardsEl.innerHTML = `<div class="err" style="grid-column:1/-1">
@@ -153,49 +146,48 @@ async function load(){
   try {
     r = await fetch("/api/courses");
   } catch {
-    hata("Sunucuya ulaşılamadı.", "Sunucu kapalı olabilir — terminalde "
-      + "<code>dersnotu serve</code> ile başlat.");
+    hata("Could not reach the server.", "It may be stopped. Start it in the terminal with "
+      + "<code>dersnotu serve</code>.");
     return;
   }
   if (r.status === 404) {
-    hata("Çalışan sunucu bu sayfadan eski.",
-      "Ders kitaplığı uçları bu süreçte yok. Terminalde sunucuyu durdurup "
-      + "yeniden başlat (<code>Ctrl+C</code>, sonra <code>dersnotu serve</code>). "
-      + "Geliştirirken <code>--reload</code> eklersen bu bir daha olmaz.");
+    hata("The running server is older than this page.",
+      "The course-library endpoints are unavailable. Restart the server in the terminal "
+      + "(<code>Ctrl+C</code>, then <code>dersnotu serve</code>). Add <code>--reload</code> "
+      + "during development to reload changes automatically.");
     return;
   }
-  if (!r.ok) { hata(`Ders listesi alınamadı (HTTP ${r.status}).`); return; }
+  if (!r.ok) { hata(`Could not load courses (HTTP ${r.status}).`); return; }
   const list = await r.json();
-  if (!Array.isArray(list)) { hata("Sunucudan beklenmeyen yanıt geldi."); return; }
+  if (!Array.isArray(list)) { hata("The server returned an unexpected response."); return; }
   ciz(list);
 }
 
 async function sil(e){
-  // Kart bir <a>; silme düğmesi onun içinde. Durdurulmazsa hem onay çıkar
-  // hem de derse gidilir.
+  // The delete button sits inside a link, so stop navigation explicitly.
   e.preventDefault(); e.stopPropagation();
   const { del: id, name } = e.currentTarget.dataset;
   const c = await (await fetch(`/api/courses/${id}`)).json();
   const n = c.counts;
-  const ne = [n.lectures && `${n.lectures} slayt`, n.books && `${n.books} kitap`,
-              n.documents && `${n.documents} ders notu`].filter(Boolean).join(", ");
-  const mesaj = `"${name}" dersi silinsin mi?`
-    + (ne ? `\n\nBirlikte silinecekler: ${ne}.` : "")
-    + "\n\nBu geri alınamaz.";
+  const ne = [n.lectures && `${n.lectures} slide deck`, n.books && `${n.books} textbook`,
+              n.documents && `${n.documents} document`].filter(Boolean).join(", ");
+  const mesaj = `Delete the course "${name}"?`
+    + (ne ? `\n\nAlso deleted: ${ne}.` : "")
+    + "\n\nThis cannot be undone.";
   if (!confirm(mesaj)) return;
   const r = await fetch(`/api/courses/${id}`, { method: "DELETE" });
-  if (!r.ok) { alert("Silinemedi: " + r.statusText); return; }
+  if (!r.ok) { alert("Could not delete: " + r.statusText); return; }
   load();
 }
 
 $("#iptal").addEventListener("click", () => dlg.close());
 
 $("#newform").addEventListener("submit", async e => {
-  // method="dialog" formu kapatır; gönderimi biz yapıyoruz.
+  // Handle submission here instead of relying on method="dialog".
   e.preventDefault();
   const fd = new FormData(e.target);
   const btn = $("#olustur");
-  btn.disabled = true; btn.textContent = "Oluşturuluyor…";
+  btn.disabled = true; btn.textContent = "Creating…";
   try {
     const r = await fetch("/api/courses", {
       method: "POST",
@@ -207,11 +199,11 @@ $("#newform").addEventListener("submit", async e => {
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     const c = await r.json();
     dlg.close();
-    // Yeni ders boş; kullanıcının oradaki işi dosya yüklemek. Doğrudan götür.
+    // A new course is empty; take the user directly to material upload.
     location.href = `/ders/${c.id}`;
   } catch (err) {
     alert(err.message);
-    btn.disabled = false; btn.textContent = "Dersi oluştur";
+    btn.disabled = false; btn.textContent = "Create course";
   }
 });
 

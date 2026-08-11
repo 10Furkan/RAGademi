@@ -118,11 +118,11 @@ ALIGN_SCHEMA = {
 class Inputs:
     lecture_path: Path
     book_path: Path
-    language: str = "Türkçe"
-    depth: str = "standart"  # özet | standart | derin
-    # analoji | örnek | soru | sözlük — çoklu seçim
+    language: str = "English"
+    depth: str = "standard"  # summary | standard | deep
+    # analogy | example | quiz | glossary — multiple selections allowed
     extras: list[str] = field(default_factory=list)
-    # auto | api | cli (Claude Pro/Max aboneliği) | demo
+    # auto | api | cli (Claude Pro/Max) | codex (ChatGPT/Codex) | demo
     backend: str = "auto"
     # Geçmiş sınav kâğıdı (isteğe bağlı). Kapsamı DEĞİŞTİRMEZ; slaytta zaten
     # olan bir konunun ne kadar derin işleneceğini kaydırır.
@@ -141,8 +141,8 @@ def load_lecture(inputs: Inputs, settings: Settings, progress: Progress = _noop)
     )
     progress(
         "lecture:done",
-        f"{len(lec.slides)} slayt, {len(lec.sections)} bölüm, "
-        f"{sum(1 for s in lec.slides if s.is_visual)} görsel",
+        f"{len(lec.slides)} slides, {len(lec.sections)} sections, "
+        f"{sum(1 for s in lec.slides if s.is_visual)} visual",
     )
     return lec
 
@@ -158,14 +158,14 @@ def load_book_index(
         idx = BookIndex(idx_path)
         book = idx.book()
         if book is not None:
-            progress("book:cached", f"{idx.count()} chunk (indeks yeniden kullanıldı)")
+            progress("book:cached", f"{idx.count()} chunks (reused existing index)")
             return book, idx
         idx.close()
 
     progress("book:parse", str(inputs.book_path))
     pages = read_pages(inputs.book_path)
     book, pages = parse_book(inputs.book_path, pages)
-    progress("book:chunk", f"{book.page_count} sayfa, {len(book.sections)} TOC bölümü")
+    progress("book:chunk", f"{book.page_count} pages, {len(book.sections)} TOC sections")
 
     chunks = chunk_book(
         book,
@@ -178,13 +178,13 @@ def load_book_index(
     # önbelleğe girdiği için kitap başına bir kez ödenir.
     figures = []
     if settings.extract_book_figures:
-        progress("book:figures", "şekiller taranıyor")
+        progress("book:figures", "scanning figures")
         figures = scan_figures(inputs.book_path)
-        progress("book:figures_done", f"{len(figures)} şekil bulundu")
+        progress("book:figures_done", f"found {len(figures)} figures")
 
     idx = BookIndex(idx_path)
     idx.build(book, chunks, figures)
-    progress("book:done", f"{len(chunks)} chunk, {len(figures)} şekil indekslendi")
+    progress("book:done", f"indexed {len(chunks)} chunks and {len(figures)} figures")
     return book, idx
 
 
@@ -196,22 +196,22 @@ def build_topic_cards(
     lecture: Lecture,
     progress: Progress = _noop,
     *,
-    language: str = "Türkçe",
+    language: str = "English",
 ) -> list[TopicCard]:
-    progress("topics:start", f"{len(lecture.sections)} bölüm")
+    progress("topics:start", f"{len(lecture.sections)} sections")
     blocks = []
     for sec in lecture.sections:
         a, b = sec.slide_range
         blocks.append(
-            f"## Bölüm {sec.index} (slayt {a}-{b})\n"
-            + (f"Ajanda bağlamı: {sec.agenda_context}\n" if sec.agenda_context else "")
+            f"## Section {sec.index} (slides {a}-{b})\n"
+            + (f"Agenda context: {sec.agenda_context}\n" if sec.agenda_context else "")
             + sec.raw_text
         )
     payload = (
-        f"Ders: {lecture.title}\nÇIKTI DİLİ: {language}\n\n"
+        f"Course: {lecture.title}\nOUTPUT LANGUAGE: {language}\n\n"
         + "\n\n".join(blocks)
-        + f"\n\nHer bölüm için bir kart üret. Tam olarak {len(lecture.sections)} kart olmalı."
-        + f"\nBaşlıkları {language} yaz; key_terms İNGİLİZCE kalsın (kitap İngilizce)."
+        + f"\n\nProduce one card per section, exactly {len(lecture.sections)} cards."
+        + f"\nWrite titles in {language}; keep key_terms in English for textbook search."
     )
 
     data = llm.complete_json(
@@ -223,7 +223,7 @@ def build_topic_cards(
     by_index = {c.section_index: c for c in cards}
     # Model bir bölümü atlarsa boş kartla doldur — akış kırılmasın.
     out = [
-        by_index.get(sec.index, TopicCard(section_index=sec.index, title=f"Bölüm {sec.index + 1}"))
+        by_index.get(sec.index, TopicCard(section_index=sec.index, title=f"Section {sec.index + 1}"))
         for sec in lecture.sections
     ]
     progress("topics:done", f"{len(out)} kart")
@@ -243,13 +243,13 @@ def align_to_book(
     progress("align:start", book.title)
     outline = toc_outline(book, max_level=1)
     section_list = "\n".join(
-        f"Bölüm {c.section_index}: {c.title} — anahtar terimler: {', '.join(c.key_terms[:8])}"
+        f"Section {c.section_index}: {c.title} — key terms: {', '.join(c.key_terms[:8])}"
         for c in cards
     )
     payload = (
-        f"# Ders bölümleri\n{section_list}\n\n"
-        f"# Kitabın içindekiler ağacı ({book.page_count} sayfa)\n{outline}\n\n"
-        f"Her ders bölümü için kitapta okunması gereken PDF sayfa aralığını ver."
+        f"# Lecture sections\n{section_list}\n\n"
+        f"# Textbook table of contents ({book.page_count} pages)\n{outline}\n\n"
+        "Return the PDF page range to search for every lecture section."
     )
     data = llm.complete_json(
         system=ALIGN_SYSTEM,
@@ -334,7 +334,7 @@ def expand_section(
         rendered = render_pages(lecture.source_path, visual, max_edge=image_max_edge)
         for n in visual:
             if n in rendered:
-                content.append({"type": "text", "text": f"[Slayt {n} görüntüsü]"})
+                content.append({"type": "text", "text": f"[Image of slide {n}]"})
                 content.append(to_image_block(rendered[n]))
 
     content.append(
@@ -437,8 +437,8 @@ def _expand_all(
         )
         progress(
             "section:start",
-            f"B{sec.index} «{card.title}» slayt {sec.slide_range[0]}-{sec.slide_range[1]}, "
-            f"{len(chunks)} alıntı, {len(figures)} şekil",
+            f"S{sec.index} «{card.title}» slides {sec.slide_range[0]}-{sec.slide_range[1]}, "
+            f"{len(chunks)} excerpts, {len(figures)} figures",
         )
         delta_cb = (lambda t, i=sec.index: on_delta(i, t)) if on_delta else None
         result = expand_section(
@@ -459,14 +459,14 @@ def _expand_all(
         progress(
             "section:done",
             f"B{sec.index} "
-            + (f"HATA: {result.error}" if result.error else f"{len(result.markdown)} karakter"),
+            + (f"ERROR: {result.error}" if result.error else f"{len(result.markdown)} characters"),
         )
     return out
 
 
 def _alignment_note(aligns: list[SectionAlignment]) -> str:
     return "\n".join(
-        f"- Bölüm {a.section_index}: {', '.join(a.book_sections)} (s. {a.page_start}-{a.page_end})"
+        f"- Section {a.section_index}: {', '.join(a.book_sections)} (p. {a.page_start}-{a.page_end})"
         for a in aligns
         if a.page_start
     )
@@ -499,7 +499,7 @@ def run(
 
     exam_text = load_exam_text(inputs.exam_path)
     if exam_text:
-        progress("exam:loaded", f"{len(exam_text):,} karakter sınav metni")
+        progress("exam:loaded", f"{len(exam_text):,} characters of exam text")
     prefix = build_cached_prefix(lecture, _alignment_note(aligns), exam_text)
 
     sections = lecture.sections[:limit_sections] if limit_sections else lecture.sections
@@ -555,7 +555,7 @@ def retry_failed(
     """
     hatalilar = doc.failed
     if not hatalilar:
-        progress("retry:none", "yeniden denenecek bölüm yok")
+        progress("retry:none", "no sections to retry")
         return doc
 
     settings.ensure_dirs()
@@ -575,14 +575,14 @@ def retry_failed(
         # çerçeveden gelmeyebilir; bu yüzden açıkça uyarıyoruz.
         progress(
             "retry:rebuild",
-            "doküman konu kartlarını taşımıyor, yeniden çıkarılıyor "
-            "(bölüm başlıkları biraz farklı düşebilir)",
+            "the document has no saved topic cards; rebuilding them "
+            "(section titles may differ slightly)",
         )
         cards = build_topic_cards(llm, lecture, progress, language=inputs.language)
         aligns = align_to_book(llm, lecture, book, cards, progress)
 
     hedefler = {s.section_index for s in hatalilar}
-    progress("retry:start", f"{len(hedefler)} bölüm: {', '.join(f'B{i}' for i in sorted(hedefler))}")
+    progress("retry:start", f"{len(hedefler)} sections: {', '.join(f'S{i}' for i in sorted(hedefler))}")
 
     by_index = {s.index: s for s in lecture.sections}
     eksik = sorted(hedefler - set(by_index))
@@ -590,8 +590,8 @@ def retry_failed(
         # Ders PDF'i değişmişse bölüm indeksleri tutmaz; sessizce yanlış bölüm
         # üretmektense açıkça söyle.
         raise ValueError(
-            f"Ders PDF'i dokümanla uyuşmuyor: {eksik} numaralı bölüm yok. "
-            "Aynı ders dosyasını verdiğinden emin ol."
+            f"The lecture PDF does not match the document: section {eksik} is missing. "
+            "Make sure you supplied the same lecture file."
         )
 
     # Önek ilk koşudakiyle aynı kurulmalı: sınav kâğıdı atlanırsa yeniden
@@ -624,8 +624,8 @@ def retry_failed(
     toplam.add(llm.usage)
     progress(
         "retry:done",
-        f"{len(duzelen)}/{len(hedefler)} bölüm düzeldi"
-        + (f", {len(hedefler) - len(duzelen)} hâlâ hatalı" if len(duzelen) < len(hedefler) else ""),
+        f"recovered {len(duzelen)}/{len(hedefler)} sections"
+        + (f", {len(hedefler) - len(duzelen)} still failed" if len(duzelen) < len(hedefler) else ""),
     )
     return doc.model_copy(
         update={
@@ -639,7 +639,7 @@ def retry_failed(
     )
 
 
-_FIGURE_REF = re.compile(r"\[KŞEKİL:\s*([\d.]+?)\s*\]", re.IGNORECASE)
+_FIGURE_REF = re.compile(r"\[(?:BOOKFIGURE|KŞEKİL):\s*([\d.]+?)\s*\]", re.IGNORECASE)
 
 
 def resolve_referenced_figures(
@@ -668,7 +668,7 @@ def to_markdown(doc: StudyDocument) -> str:
         if sec.error:
             parts += [
                 f"## {sec.title}",
-                f"> ⚠️ Bu bölüm üretilemedi ({sec.error}). Slayt {sec.slide_range[0]}-{sec.slide_range[1]}.",
+                f"> ⚠️ This section could not be generated ({sec.error}). Slides {sec.slide_range[0]}-{sec.slide_range[1]}.",
                 "",
             ]
             continue

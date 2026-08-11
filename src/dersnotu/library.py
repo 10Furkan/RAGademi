@@ -389,7 +389,7 @@ class LibraryStore:
     def create_course(self, name: str, code: str = "", note: str = "") -> Course:
         name = name.strip()
         if not name:
-            raise ValueError("Ders adı boş olamaz.")
+            raise ValueError("Course name cannot be empty.")
         course = Course(
             id=_uid(), name=name, code=code.strip(), note=note.strip(),
             created_at=_now(),
@@ -410,7 +410,7 @@ class LibraryStore:
             "note": (note if note is not None else cur.note).strip(),
         }
         if not yeni["name"]:
-            raise ValueError("Ders adı boş olamaz.")
+            raise ValueError("Course name cannot be empty.")
         with self._conn() as c:
             c.execute(
                 "UPDATE courses SET name = ?, code = ?, note = ? WHERE id = ?",
@@ -424,7 +424,7 @@ class LibraryStore:
                 _COURSE_SELECT + " WHERE c.id = ?", (course_id,)
             ).fetchone()
         if row is None:
-            raise NotFound(f"Ders bulunamadı: {course_id}")
+            raise NotFound(f"Course not found: {course_id}")
         return _row_to_course(row)
 
     def courses(self) -> list[Course]:
@@ -476,7 +476,7 @@ class LibraryStore:
         için de kullanıyor, iki kez okumanın anlamı yok).
         """
         if kind not in KINDS:
-            raise ValueError(f"Geçersiz materyal türü: {kind}")
+            raise ValueError(f"Invalid material type: {kind}")
         self.course(course_id)
 
         # Aynı dosya aynı derse ikinci kez yüklendi: yeni satır açma, mevcut
@@ -514,7 +514,7 @@ class LibraryStore:
                 "SELECT * FROM materials WHERE id = ?", (material_id,)
             ).fetchone()
         if row is None:
-            raise NotFound(f"Materyal bulunamadı: {material_id}")
+            raise NotFound(f"Material not found: {material_id}")
         return self._row_to_material(row)
 
     def materials(self, course_id: str, kind: str | None = None) -> list[Material]:
@@ -547,7 +547,7 @@ class LibraryStore:
     def add_document(self, **kw: Any) -> Document:
         kind = kw.get("kind", "note")
         if kind not in DOC_KINDS:
-            raise ValueError(f"Geçersiz belge türü: {kind}")
+            raise ValueError(f"Invalid document type: {kind}")
         doc = Document(
             id=kw.get("id") or _uid(),
             course_id=kw["course_id"],
@@ -555,7 +555,7 @@ class LibraryStore:
             book_id=kw.get("book_id"),
             exam_id=kw.get("exam_id"),
             kind=kind,
-            title=kw.get("title", "Ders notu"),
+            title=kw.get("title", "Study notes"),
             pdf_path=_as_path(kw.get("pdf_path")),
             md_path=_as_path(kw.get("md_path")),
             doc_path=_as_path(kw.get("doc_path")),
@@ -658,7 +658,7 @@ class LibraryStore:
                 "SELECT * FROM documents WHERE id = ?", (document_id,)
             ).fetchone()
         if row is None:
-            raise NotFound(f"Doküman bulunamadı: {document_id}")
+            raise NotFound(f"Document not found: {document_id}")
         return _row_to_document(row)
 
     def documents(self, course_id: str) -> list[Document]:

@@ -1,8 +1,4 @@
-"""Komut satırı arayüzü.
-
-API anahtarı gerektirmeyen komutlar (inspect / index / search / estimate)
-boru hattının LLM dışı tamamını doğrulamayı sağlar.
-"""
+"""Command-line interface for local inspection and document generation."""
 
 from __future__ import annotations
 
@@ -44,17 +40,17 @@ def _konsolu_dayanikli_yap() -> None:
 
 _konsolu_dayanikli_yap()
 
-app = typer.Typer(add_completion=False, help="Ders slaytlarını anlaşılır ders notuna çevirir.")
+app = typer.Typer(add_completion=False, help="Turn lecture slides into source-grounded study notes.")
 console = Console()
 
 
 # ---------------------------------------------------------------------------
 @app.command()
 def inspect(
-    lecture: Path = typer.Argument(..., exists=True, help="Ders slaytı PDF'i"),
-    show_text: bool = typer.Option(False, "--text", help="Slayt metinlerini de yaz"),
+    lecture: Path = typer.Argument(..., exists=True, help="Lecture-slide PDF"),
+    show_text: bool = typer.Option(False, "--text", help="Also print slide text"),
 ) -> None:
-    """Ders PDF'ini ayrıştır ve bölüm yapısını göster (API gerekmez)."""
+    """Parse a lecture PDF and display its section structure (no API required)."""
     lec = parse_lecture(
         lecture,
         shape_threshold=settings.visual_shape_threshold,
@@ -62,18 +58,18 @@ def inspect(
     )
     console.print(f"[bold]{lec.title}[/bold]")
     console.print(
-        f"{len(lec.slides)} slayt · {len(lec.sections)} bölüm · "
-        f"{sum(1 for s in lec.slides if s.is_visual)} görsel slayt\n"
+        f"{len(lec.slides)} slides · {len(lec.sections)} sections · "
+        f"{sum(1 for s in lec.slides if s.is_visual)} visual slides\n"
     )
     for sec in lec.sections:
         a, b = sec.slide_range
         table = Table(
-            title=f"Bölüm {sec.index} — slayt {a}-{b}", show_header=True, header_style="dim"
+            title=f"Section {sec.index} — slides {a}-{b}", show_header=True, header_style="dim"
         )
         table.add_column("#", justify="right", width=4)
-        table.add_column("Başlık")
-        table.add_column("Görsel", width=7)
-        table.add_column("Şekil", justify="right", width=6)
+        table.add_column("Title")
+        table.add_column("Visual", width=7)
+        table.add_column("Shapes", justify="right", width=6)
         for s in sec.slides:
             table.add_row(str(s.number), s.title, "✔" if s.is_visual else "", str(s.shape_count))
         console.print(table)
@@ -85,24 +81,24 @@ def inspect(
 # ---------------------------------------------------------------------------
 @app.command()
 def index(
-    book: Path = typer.Argument(..., exists=True, help="Ders kitabı PDF'i"),
-    force: bool = typer.Option(False, "--force", help="Önbelleği yok say, yeniden indeksle"),
+    book: Path = typer.Argument(..., exists=True, help="Textbook PDF"),
+    force: bool = typer.Option(False, "--force", help="Ignore the cache and rebuild the index"),
 ) -> None:
-    """Kitabı indeksle (API gerekmez). Aynı kitap bir kez indekslenir."""
+    """Index a textbook locally; identical books are indexed only once."""
     settings.ensure_dirs()
     sha = sha256_file(book)
     if not force and BookIndex.is_built(settings.cache_dir, sha):
         idx = BookIndex(BookIndex.path_for(settings.cache_dir, sha))
-        console.print(f"[green]Indeks zaten var[/green] — {idx.count()} chunk")
+        console.print(f"[green]Index already exists[/green] — {idx.count()} chunks")
         idx.close()
         raise typer.Exit()
 
     with console.status("Sayfalar okunuyor…"):
         pages = read_pages(book)
     bk, pages = parse_book(book, pages)
-    console.print(f"{bk.page_count} sayfa · {len(bk.sections)} TOC bölümü")
+    console.print(f"{bk.page_count} pages · {len(bk.sections)} TOC sections")
 
-    with console.status("Chunk'lanıyor…"):
+    with console.status("Chunking…"):
         chunks = chunk_book(
             bk,
             pages,
@@ -115,7 +111,7 @@ def index(
     if settings.extract_book_figures:
         from .pdfio import scan_figures
 
-        with console.status("Şekiller taranıyor…"):
+        with console.status("Scanning figures…"):
             figures = scan_figures(book)
 
     idx = BookIndex(BookIndex.path_for(settings.cache_dir, sha))
@@ -123,7 +119,7 @@ def index(
     total = sum(c.token_estimate for c in chunks)
     console.print(
         f"[green]{len(chunks)} chunk indekslendi[/green] · ~{total:,} token · "
-        f"{len(figures)} şekil · {BookIndex.path_for(settings.cache_dir, sha).name}"
+        f"{len(figures)} figures · {BookIndex.path_for(settings.cache_dir, sha).name}"
     )
     idx.close()
 
@@ -134,17 +130,17 @@ def search(
     book: Path = typer.Argument(..., exists=True),
     query: str = typer.Argument(..., help="Arama sorgusu"),
     limit: int = typer.Option(5, "--limit", "-n"),
-    show: bool = typer.Option(False, "--show", help="Chunk metnini de yaz"),
+    show: bool = typer.Option(False, "--show", help="Also print chunk text"),
 ) -> None:
-    """İndekste arama yap (API gerekmez) — retrieval kalitesini test etmek için."""
+    """Search an index locally to inspect retrieval quality."""
     sha = sha256_file(book)
     if not BookIndex.is_built(settings.cache_dir, sha):
-        console.print("[red]İndeks yok.[/red] Önce: dersnotu index <kitap.pdf>")
+        console.print("[red]Index not found.[/red] Run: dersnotu index <book.pdf>")
         raise typer.Exit(code=1)
     idx = BookIndex(BookIndex.path_for(settings.cache_dir, sha))
     hits = idx.search(query, limit=limit)
     if not hits:
-        console.print("[yellow]Sonuç yok[/yellow]")
+        console.print("[yellow]No results[/yellow]")
     for c, score in hits:
         console.print(f"[bold]{score:7.2f}[/bold]  {c.citation}")
         if show:
@@ -158,9 +154,9 @@ def search(
 def estimate(
     lecture: Path = typer.Argument(..., exists=True),
     book: Path = typer.Argument(..., exists=True),
-    model: str = typer.Option(None, "--model", help="Varsayılan: ayarlardaki model"),
+    model: str = typer.Option(None, "--model", help="Default: model from settings"),
 ) -> None:
-    """Token ve maliyet tahmini yap — hiç API çağrısı yapmadan."""
+    """Estimate tokens, cost, and duration without making an API call."""
     model = model or settings.model
     lec = parse_lecture(
         lecture,
@@ -169,7 +165,7 @@ def estimate(
     )
     sha = sha256_file(book)
     if not BookIndex.is_built(settings.cache_dir, sha):
-        console.print("[red]Önce kitabı indeksle:[/red] dersnotu index <kitap.pdf>")
+        console.print("[red]Index the textbook first:[/red] dersnotu index <book.pdf>")
         raise typer.Exit(code=1)
 
     # Hesabın tamamı `estimate.py`'de; burada yalnızca sunum var. Arayüzdeki
@@ -179,30 +175,30 @@ def estimate(
     table = Table(title=f"Maliyet tahmini — {model}", show_header=True)
     table.add_column("Kalem")
     table.add_column("Token", justify="right")
-    table.add_row("Bölüm sayısı", str(p.sections))
-    table.add_row("Cache'lenen önek (1× yazma)", f"{p.cache_write:,.0f}")
+    table.add_row("Sections", str(p.sections))
+    table.add_row("Cached prefix (1× write)", f"{p.cache_write:,.0f}")
     table.add_row(f"Cache okuma ({p.sections - 1}×)", f"{p.cache_read:,.0f}")
     table.add_row(
-        f"Slayt görüntüleri ({p.visual_slides} adet × {p.image_tokens_each:,.0f})",
+        f"Slide images ({p.visual_slides} × {p.image_tokens_each:,.0f})",
         f"{p.image_tokens:,.0f}",
     )
-    table.add_row("Kitap alıntıları", f"{p.retrieval_tokens:,.0f}")
-    table.add_row("Bölüm slayt metinleri", f"{p.section_text_tokens:,.0f}")
-    table.add_row("Çıktı", f"{p.output_tokens:,.0f}")
+    table.add_row("Textbook excerpts", f"{p.retrieval_tokens:,.0f}")
+    table.add_row("Section slide text", f"{p.section_text_tokens:,.0f}")
+    table.add_row("Output", f"{p.output_tokens:,.0f}")
     table.add_row(
-        "Ucuz geçişler (giriş/çıkış)", f"{p.cheap_input:,.0f} / {p.cheap_output:,.0f}"
+        "Inexpensive passes (input/output)", f"{p.cheap_input:,.0f} / {p.cheap_output:,.0f}"
     )
     console.print(table)
-    console.print(f"\n[bold green]Tahmini maliyet: ${p.cost:.2f}[/bold green] / ders")
-    console.print(f"[dim]Prompt caching olmasaydı: ${p.no_cache_cost:.2f}[/dim]")
-    console.print(f"[dim]Tahmini süre: ~{p.seconds / 60:.0f} dk ({p.seconds_source})[/dim]")
+    console.print(f"\n[bold green]Estimated cost: ${p.cost:.2f}[/bold green] / lecture")
+    console.print(f"[dim]Without prompt caching: ${p.no_cache_cost:.2f}[/dim]")
+    console.print(f"[dim]Estimated duration: ~{p.seconds / 60:.0f} min ({p.seconds_source})[/dim]")
     if s := p.sample:
         console.print(
-            f"[dim]Örnek slayt render: {s['width']}×{s['height']}px, {s['kb']} KB "
-            f"→ ~{s['tokens_each']:,} token/slayt[/dim]"
+            f"[dim]Sample slide render: {s['width']}×{s['height']}px, {s['kb']} KB "
+            f"→ ~{s['tokens_each']:,} tokens/slide[/dim]"
         )
         console.print(
-            f"[dim]Uzun kenar yarıya inseydi görüntü maliyeti "
+            f"[dim]Halving the long edge would change image cost to "
             f"${s['image_cost']:.2f} → ${s['halved_image_cost']:.2f}[/dim]"
         )
 
@@ -212,17 +208,13 @@ def estimate(
 def preview(
     lecture: Path = typer.Argument(..., exists=True),
     book: Path = typer.Argument(..., exists=True),
-    section: int = typer.Option(0, "--section", "-s", help="Önizlenecek bölüm indeksi"),
-    language: str = typer.Option("Türkçe", "--lang", "-l"),
-    depth: str = typer.Option("standart", "--depth", "-d", help="özet | standart | derin"),
-    extra: list[str] = typer.Option([], "--extra", "-e", help="analoji | örnek | soru | sözlük"),
-    dump: Path = typer.Option(None, "--dump", help="İstek gövdesini bu dosyaya yaz"),
+    section: int = typer.Option(0, "--section", "-s", help="Section index to preview"),
+    language: str = typer.Option("English", "--lang", "-l"),
+    depth: str = typer.Option("standard", "--depth", "-d", help="summary | standard | deep"),
+    extra: list[str] = typer.Option([], "--extra", "-e", help="analogy | example | quiz | glossary"),
+    dump: Path = typer.Option(None, "--dump", help="Write the request body to this file"),
 ) -> None:
-    """Bir bölümün API istek gövdesini kur ve göster — çağrı yapmadan.
-
-    Cache kırılma noktasının yerini, blok sırasını ve token dağılımını
-    para harcamadan denetlemeyi sağlar.
-    """
+    """Build and display one section's model request without making a call."""
     import json
 
     from .llm.prompts import EXPAND_SYSTEM, build_section_request
@@ -236,19 +228,19 @@ def preview(
         max_section_slides=settings.max_section_slides,
     )
     if not 0 <= section < len(lec.sections):
-        console.print(f"[red]Bölüm {section} yok.[/red] 0-{len(lec.sections) - 1} arası ver.")
+        console.print(f"[red]Section {section} does not exist.[/red] Use 0-{len(lec.sections) - 1}.")
         raise typer.Exit(code=1)
 
     sha = sha256_file(book)
     if not BookIndex.is_built(settings.cache_dir, sha):
-        console.print("[red]Önce kitabı indeksle:[/red] dersnotu index <kitap.pdf>")
+        console.print("[red]Index the textbook first:[/red] dersnotu index <book.pdf>")
         raise typer.Exit(code=1)
     idx = BookIndex(BookIndex.path_for(settings.cache_dir, sha))
 
     sec = lec.sections[section]
     card = TopicCard(
         section_index=section,
-        title=sec.slides[0].title if sec.slides else f"Bölüm {section}",
+        title=sec.slides[0].title if sec.slides else f"Section {section}",
         key_terms=[t for t in sec.titles[:8]],
     )
     chunks = retrieve(
@@ -260,7 +252,7 @@ def preview(
     rendered = render_pages(lecture, visual, max_edge=settings.slide_image_max_edge)
     for n in visual:
         if n in rendered:
-            content.append({"type": "text", "text": f"[Slayt {n} görüntüsü]"})
+            content.append({"type": "text", "text": f"[Image of slide {n}]"})
             content.append(to_image_block(rendered[n]))
     content.append(
         {
@@ -271,12 +263,12 @@ def preview(
         }
     )
 
-    table = Table(title=f"İstek gövdesi — bölüm {section}", show_header=True)
+    table = Table(title=f"Request body — section {section}", show_header=True)
     table.add_column("#", justify="right", width=3)
     table.add_column("Tip", width=8)
     table.add_column("Cache", width=6)
     table.add_column("~Token", justify="right", width=9)
-    table.add_column("Özet")
+    table.add_column("Summary")
 
     total = estimate_tokens(EXPAND_SYSTEM)
     for i, block in enumerate(content):
@@ -294,11 +286,11 @@ def preview(
     console.print(table)
     console.print(
         f"\nSistem promptu: ~{estimate_tokens(EXPAND_SYSTEM):,} token · "
-        f"[bold]Toplam giriş: ~{total:,} token[/bold]"
+        f"[bold]Total input: ~{total:,} tokens[/bold]"
     )
     console.print(
-        f"Alıntı: {len(chunks)} · Görsel slayt: {len(visual)} · "
-        f"Cache kırılma noktası: blok {[i for i, b in enumerate(content) if 'cache_control' in b]}"
+        f"Excerpts: {len(chunks)} · Visual slides: {len(visual)} · "
+        f"Cache breakpoint: block {[i for i, b in enumerate(content) if 'cache_control' in b]}"
     )
 
     if dump:
@@ -313,31 +305,27 @@ def preview(
                     "content": [
                         b
                         if b["type"] == "text"
-                        else {**b, "source": {**b["source"], "data": "<base64 kısaltıldı>"}}
+                        else {**b, "source": {**b["source"], "data": "<base64 omitted>"}}
                         for b in content
                     ],
                 }
             ],
         }
         dump.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        console.print(f"[green]İstek gövdesi yazıldı:[/green] {dump}")
+        console.print(f"[green]Request body written:[/green] {dump}")
     idx.close()
 
 
 # ---------------------------------------------------------------------------
 @app.command()
 def render(
-    doc_json: Path = typer.Argument(None, help="build çıktısı .json (yoksa örnek kullanılır)"),
-    lecture: Path = typer.Option(None, "--lecture", help="Şekilleri çekmek için ders PDF'i"),
-    book: Path = typer.Option(None, "--book", help="Kitap şekillerini kırpmak için kitap PDF'i"),
+    doc_json: Path = typer.Argument(None, help="build output .json (uses sample when omitted)"),
+    lecture: Path = typer.Option(None, "--lecture", help="Lecture PDF used to insert slide figures"),
+    book: Path = typer.Option(None, "--book", help="Textbook PDF used to crop textbook figures"),
     out: Path = typer.Option(None, "--out", "-o"),
-    html_only: bool = typer.Option(False, "--html", help="PDF yerine HTML yaz"),
+    html_only: bool = typer.Option(False, "--html", help="Write HTML instead of PDF"),
 ) -> None:
-    """Markdown dokümanını PDF'e bas (API gerekmez).
-
-    `doc_json` verilmezse yerleşik örnek doküman kullanılır — render hattını
-    API anahtarı olmadan uçtan uca doğrulamak için.
-    """
+    """Render a Markdown document to PDF locally."""
     import json as _json
 
     from .models import StudyDocument
@@ -349,8 +337,8 @@ def render(
         default_name = doc_json.stem
     else:
         doc = sample_document()
-        default_name = "ornek-ders-notu"
-        console.print("[dim]Örnek doküman kullanılıyor (doc_json verilmedi).[/dim]")
+        default_name = "sample-study-notes"
+        console.print("[dim]Using the built-in sample because doc_json was omitted.[/dim]")
 
     settings.ensure_dirs()
     out = out or settings.out_dir / f"{default_name}.{'html' if html_only else 'pdf'}"
@@ -359,18 +347,18 @@ def render(
     html = document_to_html(doc, lecture_pdf=lecture, book_pdf=book)
     if html_only:
         out.write_text(html, encoding="utf-8")
-        console.print(f"[green]HTML yazıldı:[/green] {out} ({len(html) / 1024:.0f} KB)")
+        console.print(f"[green]HTML written:[/green] {out} ({len(html) / 1024:.0f} KB)")
         raise typer.Exit()
 
     try:
-        with console.status("Chromium ile basılıyor…"):
+        with console.status("Rendering with Chromium…"):
             html_to_pdf(html, out)
     except RenderError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
     size = out.stat().st_size / 1024
-    console.print(f"[green]PDF yazıldı:[/green] {out} ({size:.0f} KB)")
+    console.print(f"[green]PDF written:[/green] {out} ({size:.0f} KB)")
 
 
 # ---------------------------------------------------------------------------
@@ -380,25 +368,25 @@ def serve(
     port: int = typer.Option(8000, "--port", "-p"),
     reload: bool = typer.Option(False, "--reload"),
 ) -> None:
-    """Web arayüzünü ve API'yi başlat."""
+    """Start the web interface and API."""
     import uvicorn
 
     console.print(f"[bold]dersnotu[/bold] → http://{host}:{port}")
     if not LLMClient.credentials_available():
-        console.print("[yellow]API anahtarı yok — arayüz demo moduna geçecek.[/yellow]")
+        console.print("[yellow]No API key found — the interface will use demo mode.[/yellow]")
     uvicorn.run("dersnotu.api.server:app", host=host, port=port, reload=reload)
 
 
 # ---------------------------------------------------------------------------
 @app.command()
 def retry(
-    doc_json: Path = typer.Argument(..., exists=True, help="build çıktısı .json"),
+    doc_json: Path = typer.Argument(..., exists=True, help="build output .json"),
     lecture: Path = typer.Argument(..., exists=True),
     book: Path = typer.Argument(..., exists=True),
     backend: str = typer.Option("auto", "--backend", "-b"),
-    out: Path = typer.Option(None, "--out", "-o", help="Çıktı .md yolu"),
+    out: Path = typer.Option(None, "--out", "-o", help="Output .md path"),
 ) -> None:
-    """Yalnızca hata almış bölümleri yeniden üret (başarılılara dokunmaz)."""
+    """Regenerate only failed sections without changing successful ones."""
     import json as _json
 
     from .llm import BACKENDS, resolve_backend
@@ -406,17 +394,17 @@ def retry(
     from .pipeline import retry_failed
 
     if backend not in BACKENDS:
-        console.print(f"[red]Geçersiz --backend:[/red] {backend} · {', '.join(BACKENDS)}")
+        console.print(f"[red]Invalid --backend:[/red] {backend} · {', '.join(BACKENDS)}")
         raise typer.Exit(code=1)
 
     doc = StudyDocument(**_json.loads(doc_json.read_text(encoding="utf-8")))
     hatalilar = doc.failed
     if not hatalilar:
-        console.print("[green]Bu dokümanda hatalı bölüm yok.[/green]")
+        console.print("[green]This document has no failed sections.[/green]")
         raise typer.Exit()
 
     console.print(
-        f"[yellow]{len(hatalilar)} hatalı bölüm:[/yellow] "
+        f"[yellow]{len(hatalilar)} failed sections:[/yellow] "
         + ", ".join(f"B{s.section_index} «{s.title}»" for s in hatalilar)
     )
 
@@ -448,46 +436,42 @@ def retry(
     save_debug(yeni, doc_json)  # dokümanı yerinde güncelle
     kalan = len(yeni.failed)
     console.print(
-        f"\n[bold green]Yazıldı:[/bold green] {out}\n"
-        + (f"[yellow]{kalan} bölüm hâlâ hatalı.[/yellow]" if kalan else "[green]Tüm bölümler tamam.[/green]")
+        f"\n[bold green]Written:[/bold green] {out}\n"
+        + (f"[yellow]{kalan} sections still failed.[/yellow]" if kalan else "[green]All sections are complete.[/green]")
     )
 
 
 # ---------------------------------------------------------------------------
 @app.command()
 def practice(
-    lecture: Path = typer.Argument(..., exists=True, help="Ders slaytı PDF'i"),
-    book: Path = typer.Argument(..., exists=True, help="Ders kitabı PDF'i"),
-    exam: Path = typer.Argument(..., exists=True, help="Geçmiş sınav kâğıdı PDF'i"),
-    out: Path = typer.Option(None, "--out", "-o", help="Çıktı .md yolu"),
-    language: str = typer.Option("Türkçe", "--lang", "-l"),
+    lecture: Path = typer.Argument(..., exists=True, help="Lecture-slide PDF"),
+    book: Path = typer.Argument(..., exists=True, help="Textbook PDF"),
+    exam: Path = typer.Argument(..., exists=True, help="Past-exam PDF"),
+    out: Path = typer.Option(None, "--out", "-o", help="Output .md path"),
+    language: str = typer.Option("English", "--lang", "-l"),
     count: int = typer.Option(
-        0, "--count", "-n", help="Soru sayısı (0 = geçmiş kâğıtta kaç soru varsa)"
+        0, "--count", "-n", help="Question count (0 matches the past paper)"
     ),
     backend: str = typer.Option("auto", "--backend", "-b"),
-    pdf: bool = typer.Option(False, "--pdf", help="Markdown yanında PDF de bas"),
+    pdf: bool = typer.Option(False, "--pdf", help="Render a PDF alongside Markdown"),
 ) -> None:
-    """Geçmiş sınava benzer yeni sorulardan bir deneme sınavı üret.
-
-    Kâğıt BİÇİMİ verir, slaytlar KAPSAMI, kitap DOĞRULUĞU. Sorular kopyalanmaz;
-    örnek alınan geçmiş soru cevap anahtarında birebir alıntılanır.
-    """
+    """Generate a new practice exam modeled on a past paper."""
     from .llm import BACKENDS, resolve_backend
     from .practice import PracticeError, PracticeInputs
     from .practice import generate as uret
     from .practice import to_markdown as sinav_markdown
 
     if backend not in BACKENDS:
-        console.print(f"[red]Geçersiz --backend:[/red] {backend} · {', '.join(BACKENDS)}")
+        console.print(f"[red]Invalid --backend:[/red] {backend} · {', '.join(BACKENDS)}")
         raise typer.Exit(code=1)
 
     chosen = resolve_backend(backend)
     if chosen == "demo" and backend == "auto":
         console.print(
-            "[red]Hiçbir kimlik bulunamadı.[/red] --backend demo ile deneyebilirsin."
+            "[red]No model credentials were found.[/red] Try --backend demo."
         )
         raise typer.Exit(code=1)
-    console.print(f"[dim]arka uç: [bold]{chosen}[/bold][/dim]")
+    console.print(f"[dim]backend: [bold]{chosen}[/bold][/dim]")
 
     def progress(event: str, detail: str = "") -> None:
         color = {"questions:start": "cyan", "questions:done": "green"}.get(event, "dim")
@@ -516,18 +500,18 @@ def practice(
 
     dayanakli = len(sinav.grounded)
     console.print(
-        f"\n[bold green]Yazıldı:[/bold green] {out}\n"
-        f"{len(sinav.questions)} soru · {sinav.total_points} puan · "
+        f"\n[bold green]Written:[/bold green] {out}\n"
+        f"{len(sinav.questions)} questions · {sinav.total_points} points · "
         f"{sinav.duration_minutes or '?'} dakika\n"
-        f"[dim]{dayanakli}/{len(sinav.questions)} soru geçmiş kâğıttaki bir "
-        "soruya dayanıyor (alıntısı cevap anahtarında).[/dim]"
+        f"[dim]{dayanakli}/{len(sinav.questions)} questions are grounded in a "
+        "quoted question from the past paper.[/dim]"
     )
     # Kâğıda dayanmayan soru bir hata değil ama kullanıcının bilmesi gereken
     # bir şey: o sorular kapsamdan üretilmiş, "benzer" iddiası taşımıyor.
     if dayanakli < len(sinav.questions):
         console.print(
-            f"[yellow]{len(sinav.questions) - dayanakli} soru geçmiş kâğıttaki "
-            "bir soruya bağlanamadı[/yellow] — kapsamdan üretildiler."
+            f"[yellow]{len(sinav.questions) - dayanakli} questions could not be tied "
+            "to a past-paper question[/yellow] — they were generated from slide scope."
         )
 
     if pdf:
@@ -535,12 +519,12 @@ def practice(
 
         hedef = out.with_suffix(".pdf")
         try:
-            with console.status("Chromium ile basılıyor…"):
+            with console.status("Rendering with Chromium…"):
                 render_practice(sinav, hedef)
         except RenderError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(code=1) from exc
-        console.print(f"[green]PDF yazıldı:[/green] {hedef}")
+        console.print(f"[green]PDF written:[/green] {hedef}")
 
 
 # ---------------------------------------------------------------------------
@@ -548,48 +532,57 @@ def practice(
 def build(
     lecture: Path = typer.Argument(..., exists=True),
     book: Path = typer.Argument(..., exists=True),
-    out: Path = typer.Option(None, "--out", "-o", help="Çıktı .md yolu"),
-    language: str = typer.Option("Türkçe", "--lang", "-l"),
-    depth: str = typer.Option("standart", "--depth", "-d", help="özet | standart | derin"),
+    out: Path = typer.Option(None, "--out", "-o", help="Output .md path"),
+    language: str = typer.Option("English", "--lang", "-l"),
+    depth: str = typer.Option("standard", "--depth", "-d", help="summary | standard | deep"),
     extra: list[str] = typer.Option(
-        [], "--extra", "-e", help="analoji | örnek | soru | sözlük (birden çok verilebilir)"
+        [], "--extra", "-e", help="analogy | example | quiz | glossary (repeatable)"
     ),
     backend: str = typer.Option(
         "auto", "--backend", "-b",
-        help="auto | api (anahtar) | cli (Claude Pro/Max aboneliği) | demo",
+        help="auto | api | cli (Claude Pro/Max) | codex (ChatGPT/Codex) | demo",
     ),
     model: str = typer.Option(None, "--model"),
-    sections: int = typer.Option(None, "--sections", help="İlk N bölümü işle (test için)"),
-    stream: bool = typer.Option(True, "--stream/--no-stream", help="Üretimi canlı yaz"),
+    sections: int = typer.Option(None, "--sections", help="Process only the first N sections (testing)"),
+    stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream generated text live"),
 ) -> None:
-    """Ders notunu üret. Kimlik: API anahtarı veya Claude Pro aboneliği."""
+    """Generate study notes through an API, Claude subscription, or Codex subscription."""
     from .llm import BACKENDS, resolve_backend
-    from .llm.prompts import DEPTHS, EXTRAS
+    from .llm.prompts import (
+        DEPTHS,
+        EXTRAS,
+        LEGACY_DEPTHS,
+        LEGACY_EXTRAS,
+        normalize_depth,
+        normalize_extras,
+    )
 
     if backend not in BACKENDS:
-        console.print(f"[red]Geçersiz --backend:[/red] {backend} · {', '.join(BACKENDS)}")
+        console.print(f"[red]Invalid --backend:[/red] {backend} · {', '.join(BACKENDS)}")
         raise typer.Exit(code=1)
-    if depth not in DEPTHS:
-        console.print(f"[red]Geçersiz derinlik:[/red] {depth} · seçenekler: {', '.join(DEPTHS)}")
+    if depth not in DEPTHS and depth not in LEGACY_DEPTHS:
+        console.print(f"[red]Invalid depth:[/red] {depth} · options: {', '.join(DEPTHS)}")
         raise typer.Exit(code=1)
-    if bad := [e for e in extra if e not in EXTRAS]:
+    if bad := [e for e in extra if e not in EXTRAS and e not in LEGACY_EXTRAS]:
         console.print(
-            f"[red]Geçersiz --extra:[/red] {', '.join(bad)} · seçenekler: {', '.join(EXTRAS)}"
+            f"[red]Invalid --extra:[/red] {', '.join(bad)} · options: {', '.join(EXTRAS)}"
         )
         raise typer.Exit(code=1)
 
+    depth = normalize_depth(depth)
+    extra = normalize_extras(extra)
     chosen = resolve_backend(backend)
     if chosen == "demo" and backend == "auto":
         console.print(
-            "[red]Hiçbir kimlik bulunamadı.[/red]\n"
-            "  API için:        ANTHROPIC_API_KEY ortam değişkenini ayarla\n"
-            "  Claude Pro için: Claude Code kur ve `claude` ile giriş yap "
-            "(sonra --backend cli)\n"
-            "  Denemek için:    --backend demo\n\n"
-            "Kimliksiz çalışanlar: [bold]inspect / index / search / estimate / preview[/bold]"
+            "[red]No model credentials were found.[/red]\n"
+            "  API:        set ANTHROPIC_API_KEY\n"
+            "  Claude Pro: install Claude Code, sign in with `claude`, then use --backend cli\n"
+            "  Codex:      run `codex login`, then use --backend codex\n"
+            "  Try it:     --backend demo\n\n"
+            "Credential-free commands: [bold]inspect / index / search / estimate / preview[/bold]"
         )
         raise typer.Exit(code=1)
-    console.print(f"[dim]arka uç: [bold]{chosen}[/bold][/dim]")
+    console.print(f"[dim]backend: [bold]{chosen}[/bold][/dim]")
 
     if model:
         settings.model = model
@@ -629,14 +622,14 @@ def build(
 
     u = doc.usage
     console.print(
-        f"\n[bold green]Yazıldı:[/bold green] {out}\n"
-        f"Çağrı: {u.calls} · giriş {u.input_tokens:,} · çıkış {u.output_tokens:,} · "
-        f"cache yazma {u.cache_creation_tokens:,} · cache okuma {u.cache_read_tokens:,}\n"
-        f"Tahmini maliyet: [bold]${estimate_cost(u, settings.model):.3f}[/bold]"
+        f"\n[bold green]Written:[/bold green] {out}\n"
+        f"Calls: {u.calls} · input {u.input_tokens:,} · output {u.output_tokens:,} · "
+        f"cache writes {u.cache_creation_tokens:,} · cache reads {u.cache_read_tokens:,}\n"
+        f"Estimated cost: [bold]${estimate_cost(u, settings.model):.3f}[/bold]"
     )
     failed = [s for s in doc.sections if s.error]
     if failed:
-        console.print(f"[yellow]{len(failed)} bölüm üretilemedi[/yellow]")
+        console.print(f"[yellow]{len(failed)} sections could not be generated[/yellow]")
 
 
 if __name__ == "__main__":

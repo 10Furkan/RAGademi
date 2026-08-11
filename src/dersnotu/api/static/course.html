@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dersnotu — ders</title>
+<title>RAGademi — Course</title>
 <link rel="stylesheet" href="/static/app.css">
 <style>
 header{padding:34px 0 22px}
@@ -12,7 +12,7 @@ header{padding:34px 0 22px}
 .back:hover{color:var(--ink)}
 .title{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-top:16px}
 .title h1{font-size:clamp(26px,3.4vw,36px);margin:0;max-width:26ch}
-/* .kod'un kendisi app.css'te — iki sayfada aynı etiket. */
+/* .kod lives in app.css and is shared by both pages. */
 .title .acts{margin-left:auto;display:flex;gap:8px}
 .subnote{color:var(--muted);font-size:14px;margin:8px 0 0}
 
@@ -20,8 +20,7 @@ header{padding:34px 0 22px}
          margin-bottom:10px}
 .colhead .lab{margin:0}
 .drop.slim{min-height:44px;padding:11px 13px;font-size:12.5px;justify-content:center}
-/* Seçim özeti. Dosya adı taşıdığı için asla büyütülmez — bkz. course.html
-   içindeki #sinavSecim notu. */
+/* Selection summary. Keep original filename casing. */
 .secim{margin:16px 0 0;font-size:13px;color:var(--muted);line-height:1.6}
 .hint{font-size:12px;color:var(--muted);margin:10px 0 0}
 #out{margin-bottom:22px}
@@ -33,12 +32,12 @@ header{padding:34px 0 22px}
 <body>
 <div class="wrap">
   <header>
-    <a class="back" href="/">← Derslerim</a>
+    <a class="back" href="/">← My Courses</a>
     <div class="title">
       <span class="kod" id="kod" hidden></span>
       <h1 id="ad">…</h1>
       <span class="acts">
-        <button class="ghost" id="duzenle">Düzenle</button>
+        <button class="ghost" id="duzenle">Edit</button>
       </span>
     </div>
     <p class="subnote" id="not"></p>
@@ -46,135 +45,135 @@ header{padding:34px 0 22px}
 
   <main>
     <aside class="rail">
-      <h2 id="railbaslik">Ders özeti</h2>
+      <h2 id="railbaslik">Course summary</h2>
       <div id="steps"></div>
       <div id="ozet"></div>
       <div class="meta" id="meta" hidden></div>
-      <a class="dl" id="dl" hidden>PDF indir</a>
+      <a class="dl" id="dl" hidden>Download PDF</a>
       <div class="retry" id="retrybox" hidden>
         <p class="why" id="retrywhy"></p>
-        <button type="button" id="retry">Eksik bölümleri tamamla</button>
+        <button type="button" id="retry">Complete missing sections</button>
       </div>
     </aside>
 
     <div>
-      <!-- 1. Neyim var -->
+      <!-- 1. Available materials -->
       <section class="panel">
         <div class="panel-head">
-          <h2>Materyaller</h2>
+          <h2>Materials</h2>
         </div>
-        <p class="sub">Bir kez yükle, her ders notunda kullan. Kitap ilk seferde
-           indekslenir; sonraki üretimler hazır indeksten okur.</p>
+        <p class="sub">Upload once and reuse in every document. The textbook is indexed
+           on first use; later generations reuse the ready index.</p>
         <div class="grid3">
           <div>
             <div class="colhead">
-              <span class="lab">Ders slaytları</span>
+              <span class="lab">Lecture slides</span>
               <span class="lab" id="saySlayt"></span>
             </div>
             <div class="rows" id="lectures"></div>
             <div class="drop slim" id="d-lecture">
               <input type="file" accept="application/pdf" data-kind="lecture">
-              <span class="name">+ Slayt PDF'i yükle</span>
+              <span class="name">+ Upload slide PDF</span>
             </div>
           </div>
           <div>
             <div class="colhead">
-              <span class="lab">Ders kitapları</span>
+              <span class="lab">Textbooks</span>
               <span class="lab" id="sayKitap"></span>
             </div>
             <div class="rows" id="books"></div>
             <div class="drop slim" id="d-book">
               <input type="file" accept="application/pdf" data-kind="book">
-              <span class="name">+ Kitap PDF'i yükle</span>
+              <span class="name">+ Upload textbook PDF</span>
             </div>
           </div>
           <div>
             <div class="colhead">
-              <span class="lab">Geçmiş sınavlar</span>
+              <span class="lab">Past exams</span>
               <span class="lab" id="saySinav"></span>
             </div>
             <div class="rows" id="exams"></div>
             <div class="drop slim" id="d-exam">
               <input type="file" accept="application/pdf" data-kind="exam">
-              <span class="name">+ Sınav PDF'i yükle</span>
+              <span class="name">+ Upload exam PDF</span>
             </div>
-            <p class="hint">İsteğe bağlı. Kapsamı değiştirmez — slaytta zaten
-               olan konulardan sınavda çıkmış olanları daha derin işler.</p>
+            <p class="hint">Optional. It does not change scope; it gives more depth to
+               slide topics that have appeared in past exams.</p>
           </div>
         </div>
       </section>
 
-      <!-- 2. Ne üreteyim -->
+      <!-- 2. Generate study notes -->
       <section class="panel">
         <div class="panel-head">
-          <h2>Ders notu üret</h2>
+          <h2>Generate study notes</h2>
         </div>
-        <p class="sub" id="secim">Yukarıdan bir slayt ve bir kitap seç.</p>
+        <p class="sub" id="secim">Select a slide deck and a textbook above.</p>
 
         <div class="modes">
           <div>
-            <span class="lab">Kimlik</span>
+            <span class="lab">Model access</span>
             <div class="seg" id="backends">
-              <label><input type="radio" name="backend" value="api"><span>API anahtarı</span></label>
+              <label><input type="radio" name="backend" value="api"><span>API key</span></label>
               <label><input type="radio" name="backend" value="cli"><span>Claude Pro</span></label>
+              <label><input type="radio" name="backend" value="codex"><span>Codex</span></label>
               <label><input type="radio" name="backend" value="demo" checked><span>Demo</span></label>
             </div>
           </div>
           <div>
-            <span class="lab">Derinlik</span>
+            <span class="lab">Depth</span>
             <div class="seg">
-              <label><input type="radio" name="depth" value="özet"><span>Özet</span></label>
-              <label><input type="radio" name="depth" value="standart" checked><span>Standart</span></label>
-              <label><input type="radio" name="depth" value="derin"><span>Derin</span></label>
+              <label><input type="radio" name="depth" value="summary"><span>Summary</span></label>
+              <label><input type="radio" name="depth" value="standard" checked><span>Standard</span></label>
+              <label><input type="radio" name="depth" value="deep"><span>Deep</span></label>
             </div>
           </div>
           <div>
-            <span class="lab">Dil</span>
+            <span class="lab">Language</span>
             <div class="seg">
-              <label><input type="radio" name="language" value="Türkçe" checked><span>Türkçe</span></label>
-              <label><input type="radio" name="language" value="English"><span>English</span></label>
+              <label><input type="radio" name="language" value="English" checked><span>English</span></label>
+              <label><input type="radio" name="language" value="Turkish"><span>Turkish</span></label>
               <label><input type="radio" name="language" value="Deutsch"><span>Deutsch</span></label>
             </div>
           </div>
           <div>
-            <span class="lab">Ek anlatım</span>
+            <span class="lab">Enhancements</span>
             <div class="chips">
-              <label><input type="checkbox" name="extras" value="analoji"><span>Analoji</span></label>
-              <label><input type="checkbox" name="extras" value="örnek"><span>Ek örnek</span></label>
-              <label><input type="checkbox" name="extras" value="soru"><span>Kendini sına</span></label>
-              <label><input type="checkbox" name="extras" value="sözlük"><span>Sözlük</span></label>
+              <label><input type="checkbox" name="extras" value="analogy"><span>Analogy</span></label>
+              <label><input type="checkbox" name="extras" value="example"><span>Extra example</span></label>
+              <label><input type="checkbox" name="extras" value="quiz"><span>Self-check</span></label>
+              <label><input type="checkbox" name="extras" value="glossary"><span>Glossary</span></label>
             </div>
           </div>
         </div>
 
-        <!-- Seçeneklerin ne yaptığı. Varsayılan olarak SEÇİLİ olanı anlatır;
-             bir seçeneğin üzerine gelince ona geçer. Dört chip'in altına dört
-             satır yazmak bandı okunmaz ederdi. -->
+        <!-- Explain the selected option; hovering another option previews its help. -->
         <p class="modehint" id="modehint"></p>
 
         <div class="opts" style="margin-top:18px">
           <span id="cred"></span>
-          <button id="go" style="margin-left:auto" disabled>Ders notu oluştur</button>
+          <button id="go" style="margin-left:auto" disabled>Generate study notes</button>
         </div>
 
-        <!-- Basmadan önce ne ödeyeceğini gör. Boşken hiç yer kaplamaz. -->
+        <!-- Show cost and duration before generation. -->
         <div class="tahmin" id="tahmin" hidden></div>
       </section>
 
-      <!-- 2b. Geçmiş sınava benzer sorular -->
+      <!-- 2b. Questions modeled on a past exam -->
       <section class="panel">
         <div class="panel-head">
-          <h2>Deneme sınavı üret</h2>
+          <h2>Generate a practice exam</h2>
         </div>
-        <p class="sub">Geçmiş kâğıt <b>biçimi</b> verir (soru tipi, uzunluk, puan,
-           zorluk), slaytlar <b>kapsamı</b>, kitap <b>doğruluğu</b>. Sorular
-           kopyalanmaz; örnek alınan soru cevap anahtarında birebir alıntılanır.</p>
+        <p class="sub">The past paper provides the <b>format</b> (question type, length,
+           points, difficulty), the slides provide the <b>scope</b>, and the textbook
+           provides <b>accuracy</b>. Questions are not copied; any source question used
+           as a model is quoted verbatim in the answer key.</p>
 
         <div class="modes">
           <div>
-            <span class="lab">Soru sayısı</span>
+            <span class="lab">Number of questions</span>
             <div class="seg">
-              <label><input type="radio" name="count" value="0" checked><span>Kâğıttaki kadar</span></label>
+              <label><input type="radio" name="count" value="0" checked><span>Match the paper</span></label>
               <label><input type="radio" name="count" value="5"><span>5</span></label>
               <label><input type="radio" name="count" value="10"><span>10</span></label>
               <label><input type="radio" name="count" value="20"><span>20</span></label>
@@ -182,36 +181,31 @@ header{padding:34px 0 22px}
           </div>
         </div>
 
-        <!-- Bu satır DOSYA ADI taşıyor, o yüzden `.lab` DEĞİL: `.lab`
-             büyütüyor ve sayfa lang="tr" olduğu için "Bitsints" → "BİTSİNTS"
-             oluyordu. İngilizce bir dosya adını Türkçe kurallarıyla büyütmek
-             onu bozar. Üstteki panelin `#secim` satırıyla aynı biçim. -->
+        <!-- Preserve filename casing by avoiding the uppercase label style. -->
         <p class="secim" id="sinavSecim"></p>
 
         <div class="opts" style="margin-top:14px">
-          <!-- Kimlik ve dil YUKARIDAKİ panelden okunur. İkinci bir kimlik
-               seçici koymak, iki seçimin ayrışıp kullanıcının hangisinin
-               geçerli olduğunu bilememesi demekti. -->
-          <span class="lab" style="margin:0">Kimlik ve dil yukarıdaki seçimden</span>
-          <button id="goSinav" style="margin-left:auto" disabled>Deneme sınavı oluştur</button>
+          <!-- Model access and language are shared with the panel above. -->
+          <span class="lab" style="margin:0">Uses the model access and language selected above</span>
+          <button id="goSinav" style="margin-left:auto" disabled>Generate practice exam</button>
         </div>
 
         <div class="tahmin" id="tahminSinav" hidden></div>
       </section>
 
-      <!-- 3. Canlı çıktı: bir iş başlayana kadar yok -->
+      <!-- 3. Live output: hidden until a job starts -->
       <section class="out empty" id="out" hidden></section>
 
-      <!-- 4. Ne ürettim -->
+      <!-- 4. Generated documents -->
       <section class="panel">
         <div class="panel-head">
-          <h2>Üretilenler</h2>
+          <h2>Generated documents</h2>
           <span class="lab" id="sayNot"></span>
         </div>
         <div class="search">
           <input type="text" id="q" autocomplete="off"
-                 placeholder="Notlarda ve deneme sorularında ara — ör. ikinin tümleyeni">
-          <button class="ghost" id="qclear" hidden>temizle</button>
+                 placeholder="Search study notes and practice questions — e.g. two's complement">
+          <button class="ghost" id="qclear" hidden>clear</button>
         </div>
         <div class="rows" id="docs"></div>
         <div id="hits" hidden></div>
@@ -222,24 +216,24 @@ header{padding:34px 0 22px}
 
 <dialog id="dlg">
   <form id="editform">
-    <h2 style="margin:0 0 18px;font-size:20px">Dersi düzenle</h2>
+    <h2 style="margin:0 0 18px;font-size:20px">Edit course</h2>
     <div class="field" style="margin-bottom:14px">
-      <span class="lab">Ders adı</span>
+      <span class="lab">Course name</span>
       <input type="text" name="name" required maxlength="120">
     </div>
     <div class="field" style="margin-bottom:14px">
-      <span class="lab">Ders kodu</span>
+      <span class="lab">Course code</span>
       <input type="text" name="code" maxlength="24">
     </div>
     <div class="field">
-      <span class="lab">Not</span>
+      <span class="lab">Note</span>
       <input type="text" name="note" maxlength="200">
     </div>
     <div style="display:flex;gap:10px;justify-content:space-between;margin-top:22px">
-      <button type="button" class="ghost danger" id="dersSil">Dersi sil</button>
+      <button type="button" class="ghost danger" id="dersSil">Delete course</button>
       <span style="display:flex;gap:10px">
-        <button type="button" class="ghost" id="iptal">Vazgeç</button>
-        <button type="submit">Kaydet</button>
+        <button type="button" class="ghost" id="iptal">Cancel</button>
+        <button type="submit">Save</button>
       </span>
     </div>
   </form>
@@ -260,13 +254,12 @@ let ders = null, sections = {}, calisiyor = false;
 
 const boyut = b => b > 1048576 ? (b / 1048576).toFixed(1) + " MB"
                                : Math.max(1, Math.round(b / 1024)) + " KB";
-const tarih = s => new Date(s).toLocaleDateString("tr",
+const tarih = s => new Date(s).toLocaleDateString("en",
   { day: "numeric", month: "short", year: "numeric" });
-// Dakikaya yuvarlamak kısa koşuları "0 dk" diye gösteriyordu — bozuk görünüyor
-// ve demo koşularının hepsi öyle.
-const sure = s => s < 60 ? `${Math.round(s)} sn` : `${Math.round(s / 60)} dk`;
+// Keep short runs in seconds so they do not appear as zero minutes.
+const sure = s => s < 60 ? `${Math.round(s)} sec` : `${Math.round(s / 60)} min`;
 
-// --- ders yükle -----------------------------------------------------------
+// --- load course ----------------------------------------------------------
 function sayfaHatasi(mesaj){
   document.querySelector("main").innerHTML =
     `<div class="err" style="grid-column:1/-1">${mesaj}</div>`;
@@ -277,14 +270,14 @@ async function yukle(){
   try {
     r = await fetch(`/api/courses/${CID}`);
   } catch {
-    sayfaHatasi("Sunucuya ulaşılamadı. Kapanmış olabilir — terminalde "
-      + "<code>dersnotu serve</code> ile başlat."); return;
+    sayfaHatasi("Could not reach the server. It may be stopped — start it in the terminal with "
+      + "<code>dersnotu serve</code>."); return;
   }
-  if (r.status === 404) { sayfaHatasi("Bu ders bulunamadı; silinmiş olabilir. "
-    + '<a href="/">Derslerime dön</a>.'); return; }
-  if (!r.ok) { sayfaHatasi(`Ders yüklenemedi (HTTP ${r.status}).`); return; }
+  if (r.status === 404) { sayfaHatasi("This course was not found; it may have been deleted. "
+    + '<a href="/">Return to My Courses</a>.'); return; }
+  if (!r.ok) { sayfaHatasi(`Could not load course (HTTP ${r.status}).`); return; }
   ders = await r.json();
-  document.title = `${ders.name} — dersnotu`;
+  document.title = `${ders.name} — RAGademi`;
   $("#ad").textContent = ders.name;
   $("#kod").hidden = !ders.code; $("#kod").textContent = ders.code;
   $("#not").textContent = ders.note || "";
@@ -292,8 +285,8 @@ async function yukle(){
 }
 
 function materyalHTML(m, group){
-  const alt = [m.pages ? `${m.pages} sayfa` : null, boyut(m.size),
-               m.indexed ? "indekslendi" : null].filter(Boolean).join(" · ");
+  const alt = [m.pages ? `${m.pages} pages` : null, boyut(m.size),
+               m.indexed ? "indexed" : null].filter(Boolean).join(" · ");
   return `<label class="pick">
     <input type="radio" name="${group}" value="${m.id}">
     <span class="pb">
@@ -303,9 +296,9 @@ function materyalHTML(m, group){
         <span class="mt">${alt}</span>
       </span>
       <span class="acts">
-        <a class="act" href="/api/materials/${m.id}/download">indir</a>
+        <a class="act" href="/api/materials/${m.id}/download">download</a>
         <button class="act" type="button" data-delmat="${m.id}"
-                data-name="${esc(m.name)}">sil</button>
+                data-name="${esc(m.name)}">delete</button>
       </span>
     </span>
   </label>`;
@@ -313,9 +306,7 @@ function materyalHTML(m, group){
 
 function cizMateryal(){
   const bos = t => `<p class="empty-note">${t}</p>`;
-  // Liste her `yukle()` çağrısında yeniden çiziliyor — üretim bittikten sonra
-  // da. Seçim korunmazsa sınav kâğıdı "Kullanma"ya döner ve arka arkaya iki
-  // deneme üretmek isteyen kullanıcı her seferinde kâğıdı yeniden seçer.
+  // Preserve selections when lists are redrawn after generation.
   const onceki = {
     lecture_id: deger("lecture_id"),
     book_id: deger("book_id"),
@@ -323,29 +314,27 @@ function cizMateryal(){
   };
   $("#lectures").innerHTML = ders.lectures.length
     ? ders.lectures.map(m => materyalHTML(m, "lecture_id")).join("")
-    : bos("Henüz slayt yok.");
+    : bos("No slide decks yet.");
   $("#books").innerHTML = ders.books.length
     ? ders.books.map(m => materyalHTML(m, "book_id")).join("")
-    : bos("Henüz kitap yok.");
-  // Sınav seçimi isteğe bağlı, o yüzden listede açık bir "kullanma" seçeneği
-  // var: seçili radyoyu geri almanın gizli bir yolunu aramak zorunda kalma.
+    : bos("No textbooks yet.");
+  // The past exam is optional, so provide an explicit no-exam option.
   $("#exams").innerHTML = ders.exams.length
     ? `<label class="pick"><input type="radio" name="exam_id" value="" checked>
          <span class="pb"><span class="dot"></span>
-         <span class="grow"><span class="nm">Kullanma</span></span></span></label>`
+         <span class="grow"><span class="nm">Do not use</span></span></span></label>`
       + ders.exams.map(m => materyalHTML(m, "exam_id")).join("")
-    : bos("Henüz sınav kâğıdı yok.");
+    : bos("No past exams yet.");
 
   $("#saySlayt").textContent = ders.lectures.length || "";
   $("#sayKitap").textContent = ders.books.length || "";
   $("#saySinav").textContent = ders.exams.length || "";
 
-  // En son yüklenen makul bir varsayılan; tek dosya varsa seçim zaten tek.
+  // Default to the first available item.
   for (const [g, list] of [["lecture_id", ders.lectures], ["book_id", ders.books]])
     if (list.length) document.querySelector(`input[name="${g}"]`).checked = true;
 
-  // Sonra önceki seçimi geri koy — materyal hâlâ duruyorsa. Silinmişse
-  // varsayılan yerinde kalır, kırık bir seçime yapışıp kalmayız.
+  // Restore the previous selection when the material still exists.
   for (const [g, v] of Object.entries(onceki)) {
     if (v === null) continue;
     const geri = document.querySelector(`input[name="${g}"][value="${CSS.escape(v)}"]`);
@@ -360,30 +349,29 @@ function cizMateryal(){
 function dokumanHTML(d){
   const eksik = (d.failed_sections || []).length;
   const sinav = d.kind === "practice";
-  // İki belge türü aynı listede duruyor; ayırt eden şey rozet ve alt satır.
-  // Ayrı panel açmak sayfayı uzatır, rozetin söylemediği bir şey söylemezdi.
+  // Both document types share this list and are distinguished by metadata.
   const alt = sinav
-    ? [tarih(d.created_at), `${d.sections} soru`,
+    ? [tarih(d.created_at), `${d.sections} questions`,
        d.backend === "demo" ? "demo" : null,
        d.duration ? sure(d.duration) : null].filter(Boolean).join(" · ")
     : [tarih(d.created_at), d.depth, (d.extras || []).join(", "),
-       d.exam_id ? "sınav odaklı" : null,
+       d.exam_id ? "exam-focused" : null,
        d.backend === "demo" ? "demo" : null,
        d.duration ? sure(d.duration) : null,
       ].filter(Boolean).join(" · ");
   const acts = [
-    d.has_html ? `<a class="act oku" href="/ders/${CID}/not/${d.id}">oku</a>` : "",
+    d.has_html ? `<a class="act oku" href="/ders/${CID}/not/${d.id}">read</a>` : "",
     d.has_pdf ? `<a class="act" href="/api/documents/${d.id}/download">pdf</a>` : "",
     d.has_md ? `<a class="act" href="/api/documents/${d.id}/download?fmt=md">md</a>` : "",
-    d.can_retry ? `<button class="act" type="button" data-retrydoc="${d.id}">tamamla</button>` : "",
-    `<button class="act" type="button" data-deldoc="${d.id}" data-name="${esc(d.title)}">sil</button>`,
+    d.can_retry ? `<button class="act" type="button" data-retrydoc="${d.id}">complete</button>` : "",
+    `<button class="act" type="button" data-deldoc="${d.id}" data-name="${esc(d.title)}">delete</button>`,
   ].join("");
   return `<div class="row">
     <span class="grow">
-      <span class="nm">${sinav ? `<span class="tur">deneme</span>` : ""}${esc(d.title)}</span>
+       <span class="nm">${sinav ? `<span class="tur">practice</span>` : ""}${esc(d.title)}</span>
       <span class="mt">${alt}</span>
     </span>
-    ${eksik ? `<span class="warn">${eksik} bölüm eksik</span>` : ""}
+    ${eksik ? `<span class="warn">${eksik} section${eksik === 1 ? "" : "s"} missing</span>` : ""}
     <span class="acts">${acts}</span>
   </div>`;
 }
@@ -391,7 +379,7 @@ function dokumanHTML(d){
 function cizDokuman(){
   $("#docs").innerHTML = ders.documents.length
     ? ders.documents.map(dokumanHTML).join("")
-    : `<p class="empty-note">Henüz bir şey üretilmedi.</p>`;
+    : `<p class="empty-note">Nothing has been generated yet.</p>`;
   $("#sayNot").textContent = ders.documents.length || "";
   $$("[data-deldoc]").forEach(b => b.addEventListener("click", silDokuman));
   $$("[data-retrydoc]").forEach(b => b.addEventListener("click", tamamla));
@@ -400,11 +388,11 @@ function cizDokuman(){
 function cizOzet(){
   if (calisiyor) return;
   const n = ders.counts;
-  $("#railbaslik").textContent = "Ders özeti";
+  $("#railbaslik").textContent = "Course summary";
   $("#ozet").innerHTML = `<div class="meta" style="margin-top:0;border-top:none;padding-top:0">
-    slayt <b>${n.lectures}</b><br>kitap <b>${n.books}</b><br>
-    ders notu <b>${n.notes}</b><br>deneme sınavı <b>${n.practices}</b><br>
-    oluşturuldu <b>${tarih(ders.created_at)}</b></div>`;
+    slide decks <b>${n.lectures}</b><br>textbooks <b>${n.books}</b><br>
+    study notes <b>${n.notes}</b><br>practice exams <b>${n.practices}</b><br>
+    created <b>${tarih(ders.created_at)}</b></div>`;
 }
 
 const secili = g => document.querySelector(`input[name="${g}"]:checked`);
@@ -417,26 +405,24 @@ function tazeleSecim(){
   $("#go").disabled = !(l && b) || calisiyor;
   const sinav = deger("exam_id");
   $("#secim").innerHTML = (l && b)
-    ? `<b>${esc(ad(l.value))}</b> slaytları, <b>${esc(ad(b.value))}</b> kitabından anlatılacak`
-      + (sinav ? `, <b>${esc(ad(sinav))}</b> sorularına göre derinleştirilecek.` : ".")
-    : "Yukarıdan bir slayt ve bir kitap seç.";
+    ? `<b>${esc(ad(l.value))}</b> will be explained using <b>${esc(ad(b.value))}</b>`
+      + (sinav ? `, with added depth guided by <b>${esc(ad(sinav))}</b>.` : ".")
+    : "Select a slide deck and a textbook above.";
 
-  // Deneme sınavında geçmiş kâğıt ŞABLON: ders notunda isteğe bağlıydı,
-  // burada olmadan üretilecek bir "benzer soru" da yok.
+  // A past exam is the required template for practice generation.
   $("#goSinav").disabled = !(l && b && sinav) || calisiyor;
   $("#sinavSecim").innerHTML = !(l && b)
-    ? "Önce bir slayt ve bir kitap seç."
+    ? "Select a slide deck and a textbook first."
     : !sinav
-      ? "Geçmiş sınavlardan birini seç — şablon o."
-      : `<b>${esc(ad(sinav))}</b> biçiminde, <b>${esc(ad(l.value))}</b> kapsamında.`;
+      ? "Select a past exam to use as the template."
+      : `Modeled on <b>${esc(ad(sinav))}</b>, within the scope of <b>${esc(ad(l.value))}</b>.`;
 
   tahminIste();
   tahminSinavIste();
 }
 
-// --- maliyet / süre / kota şeridi ----------------------------------------
-// Ders PDF'ini ayrıştırmak birkaç saniye; her tıklamada istek atmamak için
-// geciktiriliyor. Sunucu tarafında da SHA'ya göre önbellek var.
+// --- cost, duration, and quota strip -------------------------------------
+// Debounced here and cached by file hash on the server.
 let tahminZaman = null, tahminSira = 0;
 
 function tahminIste(){
@@ -446,7 +432,7 @@ function tahminIste(){
   clearTimeout(tahminZaman);
   kutu.hidden = false;
   kutu.className = "tahmin bekliyor";
-  kutu.textContent = "hesaplanıyor…";
+  kutu.textContent = "calculating…";
   const sira = ++tahminSira;
   tahminZaman = setTimeout(async () => {
     const p = new URLSearchParams({
@@ -457,18 +443,17 @@ function tahminIste(){
       const r = await fetch(`/api/estimate?${p}`);
       if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
       const t = await r.json();
-      if (sira !== tahminSira) return;  // daha yeni bir seçim var
+      if (sira !== tahminSira) return;  // a newer selection exists
       cizTahmin(t);
     } catch (err) {
       if (sira !== tahminSira) return;
       kutu.className = "tahmin";
-      kutu.textContent = `tahmin yapılamadı — ${err.message}`;
+      kutu.textContent = `estimate unavailable — ${err.message}`;
     }
   }, 350);
 }
 
-// Deneme sınavının kendi şeridi: hesabı da ayrı (tek çağrı, cache yok,
-// görüntü yok), o yüzden ders notunun rakamlarını göstermek yanlış olurdu.
+// Practice exams use a separate estimate: one uncached, text-only call.
 let sinavZaman = null, sinavSira = 0;
 
 function tahminSinavIste(){
@@ -478,7 +463,7 @@ function tahminSinavIste(){
   clearTimeout(sinavZaman);
   kutu.hidden = false;
   kutu.className = "tahmin bekliyor";
-  kutu.textContent = "hesaplanıyor…";
+  kutu.textContent = "calculating…";
   const sira = ++sinavSira;
   sinavZaman = setTimeout(async () => {
     const p = new URLSearchParams({
@@ -490,62 +475,58 @@ function tahminSinavIste(){
       if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
       const t = await r.json();
       if (sira !== sinavSira) return;
-      cizTahmin(t, kutu, `~<b>${t.questions}</b> soru`);
+      cizTahmin(t, kutu, `~<b>${t.questions}</b> questions`);
     } catch (err) {
       if (sira !== sinavSira) return;
       kutu.className = "tahmin";
-      kutu.textContent = `tahmin yapılamadı — ${err.message}`;
+      kutu.textContent = `estimate unavailable — ${err.message}`;
     }
   }, 350);
 }
 
 function cizTahmin(t, kutu = $("#tahmin"), ilk = null){
   kutu.className = "tahmin";
-  const dk = t.seconds < 90 ? `${Math.round(t.seconds)} sn` : `${Math.round(t.seconds / 60)} dk`;
+  const dk = t.seconds < 90 ? `${Math.round(t.seconds)} sec` : `${Math.round(t.seconds / 60)} min`;
   const tok = (t.tokens.total_input / 1000).toFixed(0);
-  const bedel = t.backend === "cli"
-    ? "<b>abonelik kotası</b> (token ücreti yok)"
+  const bedel = ["cli", "codex"].includes(t.backend)
+    ? "<b>subscription quota</b> (no per-token charge)"
     : t.backend === "demo"
-      ? "<b>ücretsiz</b> (model çağrılmaz)"
+      ? "<b>free</b> (no model call)"
       : `<b>~$${t.cost.toFixed(2)}</b>`;
   const parcalar = [
-    ilk || `<b>${t.sections}</b> bölüm`,
-    `~<b>${tok}K</b> token giriş`,
+    ilk || `<b>${t.sections}</b> sections`,
+    `~<b>${tok}K</b> input tokens`,
     bedel,
-    `~<b>${dk}</b>${t.seconds_source === "geçmiş" ? " (geçmiş koşulardan)" : ""}`,
+    `~<b>${dk}</b>${["history", "geçmiş"].includes(t.seconds_source) ? " (from previous runs)" : ""}`,
   ];
   let not = "";
   if (!t.book_indexed)
-    not += `<span class="tnote">Kitap ilk kez indekslenecek — süreye
-            ~${Math.round(t.index_seconds / 60)} dk eklendi, sonraki üretimlerde yok.</span>`;
+    not += `<span class="tnote">The textbook will be indexed for the first time —
+            ~${Math.round(t.index_seconds / 60)} min is included and will not recur.</span>`;
   const kota = kotaMetni(t.quota);
   if (t.backend === "cli" && kota) not += `<span class="tnote">${kota}</span>`;
   kutu.innerHTML = parcalar.join(" <span class='sep'>·</span> ") + not;
 }
 
-// Kota bilgisinin şeması belgelenmiş değil — yalnızca `five_hour` penceresi ve
-// `resetsAt` alanı ölçümle biliniyor. Bilinmeyen alan uydurmak yerine ne
-// varsa o gösteriliyor; ham nesne title'da duruyor.
+// Quota schema is not documented; display only observed fields.
 function kotaMetni(q){
   if (!q) return "";
   const w = q.five_hour || q;
   const ne = [];
   const yuzde = w.remaining_percent ?? w.remainingPercent ?? w.percent_remaining;
-  if (typeof yuzde === "number") ne.push(`kota %${Math.round(yuzde)}`);
+  if (typeof yuzde === "number") ne.push(`${Math.round(yuzde)}% quota remaining`);
   const reset = w.resetsAt ?? w.resets_at;
   if (reset) {
     const d = new Date(typeof reset === "number" ? reset * 1000 : reset);
-    if (!isNaN(d)) ne.push(`sıfırlanma ${d.toLocaleTimeString("tr",
+    if (!isNaN(d)) ne.push(`resets at ${d.toLocaleTimeString("en",
       { hour: "2-digit", minute: "2-digit" })}`);
   }
   if (!ne.length) return "";
-  return `<span title="${esc(JSON.stringify(q))}">5 saatlik pencere — ${ne.join(", ")}</span>`;
+  return `<span title="${esc(JSON.stringify(q))}">5-hour window — ${ne.join(", ")}</span>`;
 }
 
-// --- yükleme --------------------------------------------------------------
-// Liste kutuların KENDİSİNDEN türetiliyor: elle yazılan bir dizi, yeni bir
-// materyal türü eklendiğinde sessizce eksik kalıyor — sınav kutusu tam olarak
-// böyle dinleyicisiz kalmıştı ve yükleme hiç başlamıyordu.
+// --- upload ---------------------------------------------------------------
+// Derive upload handlers from the drop zones themselves.
 for (const box of $$(".drop")) {
   const input = box.querySelector("input");
   box.addEventListener("click", () => input.click());
@@ -561,7 +542,7 @@ for (const box of $$(".drop")) {
 async function gonder(box, input){
   const f = input.files[0], etiket = box.querySelector(".name");
   const eski = etiket.textContent;
-  etiket.textContent = `${f.name} yükleniyor…`;
+  etiket.textContent = `Uploading ${f.name}…`;
   box.classList.add("has");
   const fd = new FormData();
   fd.set("kind", input.dataset.kind); fd.set("file", f);
@@ -570,36 +551,35 @@ async function gonder(box, input){
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     await yukle();
   } catch (err) {
-    alert("Yüklenemedi: " + err.message);
+    alert("Upload failed: " + err.message);
   } finally {
     etiket.textContent = eski; box.classList.remove("has");
-    input.value = "";  // aynı dosyayı tekrar seçmek de change tetiklesin
+    input.value = "";  // allow selecting the same file again
   }
 }
 
-// --- silme ----------------------------------------------------------------
+// --- deletion -------------------------------------------------------------
 async function silMateryal(e){
   e.preventDefault(); e.stopPropagation();
   const { delmat: id, name } = e.currentTarget.dataset;
-  if (!confirm(`"${name}" silinsin mi?\n\nBu dosyadan üretilmiş ders notları kalır,`
-             + " ama eksik bölümleri tamamlanamaz.")) return;
+  if (!confirm(`Delete "${name}"?\n\nExisting study notes will remain,`
+             + " but missing sections can no longer be completed.")) return;
   const r = await fetch(`/api/materials/${id}`, { method: "DELETE" });
-  if (!r.ok) { alert("Silinemedi."); return; }
+  if (!r.ok) { alert("Could not delete the material."); return; }
   yukle();
 }
 
 async function silDokuman(e){
   e.preventDefault(); e.stopPropagation();
   const { deldoc: id, name } = e.currentTarget.dataset;
-  if (!confirm(`"${name}" silinsin mi?\n\nPDF ve Markdown dosyaları da silinir.`)) return;
+  if (!confirm(`Delete "${name}"?\n\nIts PDF and Markdown files will also be deleted.`)) return;
   const r = await fetch(`/api/documents/${id}`, { method: "DELETE" });
-  if (!r.ok) { alert("Silinemedi."); return; }
+  if (!r.ok) { alert("Could not delete the document."); return; }
   yukle();
 }
 
-// --- seçenek açıklamaları -------------------------------------------------
-// Metinler sunucudan geliyor (prompts.py / factory.py). Arayüze kopyalansaydı
-// direktif değişip açıklama olduğu yerde kalır ve sessizce yalan söylerdi.
+// --- option help ----------------------------------------------------------
+// Help comes from the server so it stays synchronized with prompt directives.
 const YARDIM = { depth: {}, extras: {}, backend: {} };
 
 const yardimMetni = inp => (YARDIM[inp.name] || {})[inp.value] || "";
@@ -617,7 +597,7 @@ function varsayilanYardim(){
   if (ekler.length) {
     const adlar = ekler.map(i => i.nextElementSibling.textContent).join(", ");
     $("#modehint").innerHTML +=
-      `<span class="ek">+ ${esc(adlar)} · seçeneğin üzerine gelince ne yaptığını yazar</span>`;
+      `<span class="ek">+ ${esc(adlar)} · hover an option to see what it does</span>`;
   }
 }
 
@@ -627,7 +607,7 @@ function yardimBagla(){
     const metin = yardimMetni(inp);
     if (!metin) continue;
     const baslik = inp.nextElementSibling.textContent;
-    // title: dokunmatikte ve ekran okuyucuda ipucu satırına erişilemiyor.
+    // Keep help available to touch users and screen readers through title.
     label.title = metin;
     const goster = () => yaz(baslik, metin);
     label.addEventListener("mouseenter", goster);
@@ -639,18 +619,18 @@ function yardimBagla(){
   varsayilanYardim();
 }
 
-// --- kimlik yolları -------------------------------------------------------
+// --- model access paths ---------------------------------------------------
 fetch("/api/health").then(r => r.json()).then(h => {
   const b = h.backends || {};
   Object.assign(YARDIM.depth, h.depth_help || {});
   Object.assign(YARDIM.extras, h.extra_help || {});
-  for (const key of ["api", "cli", "demo"]) {
+  for (const key of ["api", "cli", "codex", "demo"]) {
     const input = document.querySelector(`input[name="backend"][value="${key}"]`);
     const info = b[key] || { available: false };
     input.disabled = !info.available;
     YARDIM.backend[key] = info.available
       ? (info.help || info.label)
-      : `${info.help || info.label} — şu an kullanılamıyor.`;
+      : `${info.help || info.label} — currently unavailable.`;
     const label = input.closest("label");
     label.classList.toggle("off", !info.available);
   }
@@ -660,36 +640,35 @@ fetch("/api/health").then(r => r.json()).then(h => {
   if (pick && !pick.disabled) pick.checked = true;
   const notlar = {
     api: `model: ${h.model}`,
-    cli: "Claude Pro aboneliği — token ücreti yok, kota harcanır",
-    demo: "API çağrısı yapılmaz",
+    cli: "Claude Pro subscription — no per-token charge; uses quota",
+    codex: "Codex subscription — no per-token charge; uses quota",
+    demo: "No API call",
   };
   $("#cred").innerHTML = resolved === "demo"
-    ? `<span class="badge">kimlik yok — demo modu</span>`
+    ? `<span class="badge">no credentials — demo mode</span>`
     : `<span style="font-family:var(--mono);font-size:10.5px">${notlar[resolved]}</span>`;
 });
 
-// --- üretim ---------------------------------------------------------------
-// İki üretimin adımları farklı: deneme sınavında hizalama yok, bölüm bölüm
-// yazma yok. Tek bir listeyi ikisine birden göstermek, yarısı hiç yeşile
-// dönmeyen bir ilerleme rayı demek olurdu.
+// --- generation -----------------------------------------------------------
+// Notes and practice exams have distinct progress stages.
 const STEPS_NOT = [
-  ["lecture",  "Slaytlar ayrıştırılıyor"],
-  ["book",     "Kitap indeksleniyor"],
-  ["topics",   "Konu kartları çıkarılıyor"],
-  ["align",    "Kitapla eşleştiriliyor"],
-  ["section",  "Bölümler yazılıyor"],
-  ["render",   "PDF basılıyor"],
+  ["lecture",  "Parsing slides"],
+  ["book",     "Indexing textbook"],
+  ["topics",   "Building topic cards"],
+  ["align",    "Aligning with textbook"],
+  ["section",  "Writing sections"],
+  ["render",   "Rendering PDF"],
 ];
 const STEPS_SINAV = [
-  ["exam",      "Sınav kâğıdı okunuyor"],
-  ["lecture",   "Slaytlar ayrıştırılıyor"],
-  ["book",      "Kitap indeksleniyor"],
-  ["topics",    "Konu kartları çıkarılıyor"],
-  ["retrieve",  "Kitap alıntıları toplanıyor"],
-  ["questions", "Sorular yazılıyor"],
-  ["render",    "PDF basılıyor"],
+  ["exam",      "Reading past exam"],
+  ["lecture",   "Parsing slides"],
+  ["book",      "Indexing textbook"],
+  ["topics",    "Building topic cards"],
+  ["retrieve",  "Retrieving textbook evidence"],
+  ["questions", "Writing questions"],
+  ["render",    "Rendering PDF"],
 ];
-// İlerleme rayında hangi olay grubunun adım sayıldığı; ikisinin birleşimi.
+// Union of event groups represented on either progress rail.
 const STEP_GROUPS = ["lecture", "book", "topics", "align", "render",
                      "exam", "retrieve", "questions"];
 let STEPS = STEPS_NOT;
@@ -710,7 +689,7 @@ function sectionEl(i){
   if (outEl.classList.contains("empty")) { outEl.classList.remove("empty"); outEl.innerHTML = ""; }
   const el = document.createElement("div");
   el.className = "sec writing";
-  el.innerHTML = `<div class="tag">Bölüm ${i + 1} yazılıyor</div><pre></pre>`;
+  el.innerHTML = `<div class="tag">Writing section ${i + 1}</div><pre></pre>`;
   outEl.appendChild(el);
   sections[i] = el;
   return el;
@@ -721,35 +700,33 @@ function bosalt(mesaj, adimlar = STEPS_NOT){
   sections = {};
   STEPS = adimlar;
   for (const k in state) delete state[k];
-  $("#railbaslik").textContent = "İlerleme";
+  $("#railbaslik").textContent = "Progress";
   $("#ozet").innerHTML = "";
-  $("#go").disabled = true; $("#go").textContent = "Çalışıyor…";
+  $("#go").disabled = true; $("#go").textContent = "Working…";
   $("#goSinav").disabled = true;
   metaEl.hidden = true; dlEl.hidden = true; $("#retrybox").hidden = true;
-  // Koşu başladı, tahminlerin işi bitti.
+  // Hide preflight estimates once the job begins.
   $("#tahmin").hidden = true; $("#tahminSinav").hidden = true;
   outEl.hidden = false; outEl.className = "out empty"; outEl.textContent = mesaj;
   drawSteps();
 }
 
-// Kimlik seçimi de tahmini değiştirir (fiyatlama arka uca göre); yalnızca
-// dosya seçimini dinlemek yanlış rakam gösterirdi.
+// Backend choice affects pricing, so it also refreshes estimates.
 $$('input[name="backend"]').forEach(i => {
   i.addEventListener("change", tahminIste);
   i.addEventListener("change", tahminSinavIste);
 });
-// Soru sayısı hem süreyi hem çıktı tokenını değiştirir.
+// Question count changes both duration and output tokens.
 $$('input[name="count"]').forEach(i => i.addEventListener("change", tahminSinavIste));
 
 function bitti(){
   calisiyor = false;
-  $("#go").textContent = "Ders notu oluştur";
-  $("#goSinav").textContent = "Deneme sınavı oluştur";
+  $("#go").textContent = "Generate study notes";
+  $("#goSinav").textContent = "Generate practice exam";
   tazeleSecim();
 }
 
-// Bir işi baştan sona izler. İlk üretim ve yeniden deneme aynı yoldan geçer;
-// yeniden deneme de canlı akış ve ilerleme rayı görsün.
+// Follow initial generations and retries through the same live event stream.
 function follow(job){
   const es = new EventSource(`/api/jobs/${job.id}/events`);
   es.onmessage = ev => {
@@ -766,37 +743,36 @@ function follow(job){
       state.section = { active: true, detail: d.detail }; drawSteps(); return;
     }
     if (d.type === "section:done") {
-      const m = /^B(\d+)/.exec(d.detail || "");
+      const m = /^(?:S|B)(\d+)/.exec(d.detail || "");
       if (m) {
         const el = sectionEl(+m[1]);
         el.classList.remove("writing");
-        el.querySelector(".tag").textContent = d.detail.includes("HATA")
-          ? `Bölüm ${+m[1] + 1} — üretilemedi` : `Bölüm ${+m[1] + 1}`;
+        el.querySelector(".tag").textContent = d.detail.includes("ERROR")
+          ? `Section ${+m[1] + 1} — failed` : `Section ${+m[1] + 1}`;
       }
       return;
     }
     if (STEP_GROUPS.includes(group)) {
       state[group] = { active: true, detail: d.detail || "" };
-      // `exam:loaded` bir bitiş olayı ama adı ":done" ile bitmiyor; listeye
-      // alınmazsa sınav adımı koşu boyunca "sürüyor" görünürdü.
+      // `exam:loaded` is a completion event even though it does not end in :done.
       if (/:(done|cached|loaded)$/.test(d.type))
         state[group] = { done: true, detail: d.detail || "" };
       drawSteps(); return;
     }
     if (d.type === "job:done") {
       Object.values(state).forEach(s => { s.done = true; s.active = false; });
-      state.render = { done: true, detail: "hazır" };
+      state.render = { done: true, detail: "ready" };
       drawSteps();
       const u = d.usage || {};
       metaEl.hidden = false;
-      metaEl.innerHTML = `çağrı <b>${u.calls || 0}</b><br>
-        giriş <b>${(u.input_tokens || 0).toLocaleString("tr")}</b> token<br>
-        çıkış <b>${(u.output_tokens || 0).toLocaleString("tr")}</b> token<br>
-        cache okuma <b>${(u.cache_read_tokens || 0).toLocaleString("tr")}</b>`;
+      metaEl.innerHTML = `calls <b>${u.calls || 0}</b><br>
+        input <b>${(u.input_tokens || 0).toLocaleString("en")}</b> tokens<br>
+        output <b>${(u.output_tokens || 0).toLocaleString("en")}</b> tokens<br>
+        cache reads <b>${(u.cache_read_tokens || 0).toLocaleString("en")}</b>`;
       dlEl.hidden = false; dlEl.href = `/api/jobs/${job.id}/download`;
       showRetry(d);
       bitti();
-      yukle();  // ders notu listesine yeni satır
+      yukle();  // refresh generated-document list
     }
     if (d.type === "job:failed") {
       outEl.className = "out";
@@ -808,26 +784,25 @@ function follow(job){
   es.onerror = () => { es.close(); bitti(); };
 }
 
-// --- eksik bölümleri tamamlama -------------------------------------------
+// --- complete missing sections ------------------------------------------
 let sonDoc = null;
 
 function showRetry(d){
   const box = $("#retrybox");
-  // Yeniden deneme kalıcı dokümana bakar (sunucu yeniden başlasa da çalışır);
-  // dosya adı iş kimliği değil doküman kimliğidir.
+  // Retry uses the persistent document and survives server restarts.
   sonDoc = d.can_retry ? ((d.params || {}).out_stem || d.id) : null;
   if (!sonDoc) { box.hidden = true; return; }
   const f = d.failed_sections || [];
   $("#retrywhy").textContent =
-    `${f.length} bölüm üretilemedi (${f.map(i => `Bölüm ${i + 1}`).join(", ")}). `
-    + "Yalnızca bunlar yeniden denenir; başarılı bölümler yeniden üretilmez.";
+    `${f.length} section${f.length === 1 ? "" : "s"} failed (${f.map(i => `Section ${i + 1}`).join(", ")}). `
+    + "Only these sections will be retried; successful sections will not be regenerated.";
   $("#retry").disabled = false;
-  $("#retry").textContent = "Eksik bölümleri tamamla";
+  $("#retry").textContent = "Complete missing sections";
   box.hidden = false;
 }
 
 async function denemeBaslat(docId, btn){
-  bosalt("Eksik bölümler yeniden üretiliyor…");
+  bosalt("Regenerating missing sections…");
   try {
     const r = await fetch(`/api/documents/${docId}/retry`, { method: "POST" });
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
@@ -856,7 +831,7 @@ function tamamla(e){
 $("#go").addEventListener("click", async () => {
   const l = secili("lecture_id"), b = secili("book_id");
   if (!l || !b) return;
-  bosalt("Başlatılıyor…");
+  bosalt("Starting…");
   const fd = new FormData();
   fd.set("course_id", CID);
   fd.set("lecture_id", l.value);
@@ -879,10 +854,9 @@ $("#go").addEventListener("click", async () => {
 $("#goSinav").addEventListener("click", async () => {
   const l = secili("lecture_id"), b = secili("book_id"), s = deger("exam_id");
   if (!(l && b && s)) return;
-  // Sorular yapısal JSON olarak tek çağrıda geliyor: akıtılacak metin yok.
-  // Boş bir çıktı paneli beklemek yerine neden boş olduğunu söylüyoruz.
-  bosalt("Sorular tek çağrıda yazılıyor — bitince kâğıt hazır olacak.", STEPS_SINAV);
-  $("#goSinav").textContent = "Çalışıyor…";
+  // Structured output arrives in one response, so there is no text stream.
+  bosalt("Writing all questions in one call — the paper will appear when complete.", STEPS_SINAV);
+  $("#goSinav").textContent = "Working…";
   const fd = new FormData();
   fd.set("course_id", CID);
   fd.set("lecture_id", l.value);
@@ -901,26 +875,23 @@ $("#goSinav").addEventListener("click", async () => {
   }
 });
 
-// --- arama ----------------------------------------------------------------
+// --- search ---------------------------------------------------------------
 let aramaZaman = null;
 
 function cizHits(veri){
   const kutu = $("#hits");
   if (!veri.hits.length) {
-    kutu.innerHTML = `<p class="empty-note">“${esc(veri.query)}” için sonuç yok.
-      Arama yalnızca üretilmiş ders notlarında çalışır.</p>`;
+    kutu.innerHTML = `<p class="empty-note">No results for “${esc(veri.query)}”.
+      Search only covers generated documents.</p>`;
     return;
   }
-  // snippet() sunucudan <mark> ile geliyor; gövde bu yüzden kaçırılmıyor,
-  // ama başlık ve kullanıcının sorgusu HER ZAMAN kaçırılıyor.
-  kutu.innerHTML = `<p class="lab">${veri.hits.length} sonuç</p>` + veri.hits.map(h => {
-    // Çıpa adı belge türüne göre değişiyor: ders notunda bölüm, deneme
-    // sınavında soru. Sabit `#bolum-` yazmak sınav sonuçlarını sayfanın
-    // başına düşürürdü — bağlantı çalışır ama yanlış yere gider.
+  // snippet() is trusted server markup; escape titles and user-controlled text.
+  kutu.innerHTML = `<p class="lab">${veri.hits.length} result${veri.hits.length === 1 ? "" : "s"}</p>` + veri.hits.map(h => {
+    // Notes link to sections; practice exams link to questions.
     const sinav = h.document_kind === "practice";
     const capa = sinav ? `soru-${h.section}` : `bolum-${h.section}`;
     return `<a class="hit" href="/ders/${CID}/not/${h.document_id}#${capa}">
-       <span class="hh">${sinav ? `<span class="tur">deneme</span>` : ""}${esc(h.heading)}</span>
+       <span class="hh">${sinav ? `<span class="tur">practice</span>` : ""}${esc(h.heading)}</span>
        <span class="hd">${esc(h.document_title)}</span>
        <span class="hs">${h.snippet}</span>
      </a>`;
@@ -938,7 +909,7 @@ async function ara(){
     if (!r.ok) throw new Error(r.statusText);
     cizHits(await r.json());
   } catch (err) {
-    $("#hits").innerHTML = `<div class="err">Arama yapılamadı: ${esc(err.message)}</div>`;
+    $("#hits").innerHTML = `<div class="err">Search failed: ${esc(err.message)}</div>`;
   }
 }
 
@@ -948,7 +919,7 @@ $("#q").addEventListener("input", () => {
 });
 $("#qclear").addEventListener("click", () => { $("#q").value = ""; ara(); });
 
-// --- ders düzenle ---------------------------------------------------------
+// --- edit course ----------------------------------------------------------
 $("#duzenle").addEventListener("click", () => {
   const f = $("#editform");
   f.name.value = ders.name; f.code.value = ders.code; f.note.value = ders.note;
@@ -964,19 +935,19 @@ $("#editform").addEventListener("submit", async e => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: f.name.value, code: f.code.value, note: f.note.value }),
   });
-  if (!r.ok) { alert((await r.json()).detail || "Kaydedilemedi."); return; }
+  if (!r.ok) { alert((await r.json()).detail || "Could not save changes."); return; }
   $("#dlg").close();
   yukle();
 });
 
 $("#dersSil").addEventListener("click", async () => {
   const n = ders.counts;
-  const ne = [n.lectures && `${n.lectures} slayt`, n.books && `${n.books} kitap`,
-              n.documents && `${n.documents} ders notu`].filter(Boolean).join(", ");
-  if (!confirm(`"${ders.name}" dersi silinsin mi?`
-    + (ne ? `\n\nBirlikte silinecekler: ${ne}.` : "") + "\n\nBu geri alınamaz.")) return;
+  const ne = [n.lectures && `${n.lectures} slide deck`, n.books && `${n.books} textbook`,
+              n.documents && `${n.documents} document`].filter(Boolean).join(", ");
+  if (!confirm(`Delete the course "${ders.name}"?`
+    + (ne ? `\n\nAlso deleted: ${ne}.` : "") + "\n\nThis cannot be undone.")) return;
   const r = await fetch(`/api/courses/${CID}`, { method: "DELETE" });
-  if (!r.ok) { alert("Silinemedi."); return; }
+  if (!r.ok) { alert("Could not delete the course."); return; }
   location.href = "/";
 });
 

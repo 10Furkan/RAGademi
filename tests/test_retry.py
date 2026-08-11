@@ -113,8 +113,8 @@ class SahteLLM:
 
         metin = "\n".join(b.get("text", "") for b in content if b.get("type") == "text")
         self.cagrilar.append(metin)
-        # Kart başlıkları "B{i}"; istek gövdesindeki başlıktan bölümü oku.
-        m = re.search(r"# ŞİMDİ YAZILACAK BÖLÜM: B(\d+)", metin)
+        # Card titles are "B{i}"; read the section from the request heading.
+        m = re.search(r"# SECTION TO WRITE NOW: B(\d+)", metin)
         if m and int(m.group(1)) in self.patlayanlar:
             raise RuntimeError("yine ağ hatası")
         self.usage.add(Usage(input_tokens=10, output_tokens=5, calls=1))

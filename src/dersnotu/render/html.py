@@ -595,12 +595,12 @@ def build_toc(sections) -> str:
     items = []
     for sec in sections:
         a, b = sec.slide_range
-        title = sec.title or f"Bölüm {sec.section_index + 1}"
+        title = sec.title or f"Section {sec.section_index + 1}"
         items.append(
             f'<li><span class="label">{title}</span>'
             f'<span class="slides">slayt {a}–{b}</span></li>'
         )
-    return '<nav class="toc"><h2>İçindekiler</h2><ol>' + "".join(items) + "</ol></nav>"
+    return '<nav class="toc"><h2>Table of contents</h2><ol>' + "".join(items) + "</ol></nav>"
 
 
 def build_nav(course_href: str, course_name: str, pdf_href: str = "") -> str:
@@ -613,7 +613,7 @@ def build_nav(course_href: str, course_name: str, pdf_href: str = "") -> str:
 
 def build_page(*, title: str, body_html: str, meta: str, toc_html: str,
                lang: str = "tr", nav_html: str = "",
-               eyebrow: str = "Ders notu · kitapla genişletilmiş") -> str:
+               eyebrow: str = "Study notes · expanded with textbook evidence") -> str:
     from .markdown import pygments_css
 
     return _TEMPLATE.format(

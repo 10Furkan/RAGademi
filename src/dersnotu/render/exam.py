@@ -1,18 +1,4 @@
-"""Deneme sınavı → HTML/PDF.
-
-Ders notuyla aynı render zincirini (markdown-it → KaTeX → Pygments → Chromium)
-kullanır; ayrı olan yalnızca belgenin İSKELETİ.
-
-**Cevap anahtarı ayrı ve sonda.** Çözümü sorunun hemen altına koymak teknik
-olarak daha kolaydı ama kâğıdı denemelik olmaktan çıkarır: öğrenci soruyu
-okurken yanıtı da görür. Anahtar `break-before: page` ile ayrı sayfaya
-basılıyor, ekranda da belgenin sonunda duruyor.
-
-**Soru kâğıdından anahtara bağlantı YOK, tersi var.** Her sorunun yanına
-"cevabı gör" koymak aynı sorunu geri getirirdi; anahtardaki her kayıt ise
-sorusuna geri bağlanıyor, çünkü çözümü okurken soruya dönmek gerçek bir
-ihtiyaç.
-"""
+"""Practice exam → HTML/PDF using the shared rendering pipeline."""
 
 from __future__ import annotations
 
@@ -29,17 +15,12 @@ _TEK_P = re.compile(r"^<p>(.*)</p>\s*$", re.S)
 
 
 def _blok(md: str) -> str:
-    """Markdown bloğu → HTML (matematik, kod, atıf chip'leri dahil).
-
-    Ders PDF'i verilmiyor: sınav kâğıdında slayt görüntüsü işaretçisi
-    beklenmiyor, model yine de bırakırsa `markdown_to_html` onu görünür bir
-    nota çevirir — sessizce ham köşeli parantez basmaz.
-    """
+    """Render a Markdown block, including math, code, and citations."""
     return markdown_to_html(md or "")
 
 
 def _satir(md: str) -> str:
-    """Tek satırlık markdown; sarmalayan `<p>` atılır (şık, yanıt gibi)."""
+    """Render one-line Markdown and remove its wrapping paragraph."""
     parcali = _blok(md).strip()
     m = _TEK_P.match(parcali)
     return m.group(1) if m else parcali
@@ -53,10 +34,10 @@ def _sik_listesi(q: PracticeQuestion) -> str:
 
 
 def _soru_html(q: PracticeQuestion) -> str:
-    kunye = [f"Soru {q.number}"]
+    kunye = [f"Question {q.number}"]
     if q.kind:
         kunye.append(_html.escape(q.kind))
-    sag = f'<span class="pts">{q.points} puan</span>' if q.points else ""
+    sag = f'<span class="pts">{q.points} points</span>' if q.points else ""
     return (
         f'<section class="exam-q" id="soru-{q.number}">'
         f'<div class="qhead"><span class="qnum">{" · ".join(kunye)}</span>{sag}</div>'
@@ -68,22 +49,19 @@ def _soru_html(q: PracticeQuestion) -> str:
 def _cevap_html(q: PracticeQuestion) -> str:
     parcalar = [
         f'<section class="exam-a" id="cevap-{q.number}">',
-        f'<div class="qhead"><span class="qnum">Soru {q.number}</span>'
-        f'<a class="pts" href="#soru-{q.number}">soruya dön</a></div>',
+        f'<div class="qhead"><span class="qnum">Question {q.number}</span>'
+        f'<a class="pts" href="#soru-{q.number}">back to question</a></div>',
     ]
     if q.answer.strip():
-        parcalar.append(f'<p class="answer"><b>Yanıt:</b> {_satir(q.answer)}</p>')
+        parcalar.append(f'<p class="answer"><b>Answer:</b> {_satir(q.answer)}</p>')
     if q.solution.strip():
         parcalar.append(_blok(q.solution))
     if q.citations:
-        # Atıflar işaretçi biçiminde geçirilir; chip'e çeviren katman ortak.
-        parcalar.append(_blok(" ".join(f"[K: {c}]" for c in q.citations)))
+        parcalar.append(_blok(" ".join(f"[B: {c}]" for c in q.citations)))
     if q.modeled_on.strip():
-        # Alıntı YOKSA bu blok hiç basılmaz. "Buna benzer soru çıkmıştı" demek
-        # ancak sorunun kendisi gösterilebiliyorsa bir iddiadır.
         parcalar.append(
             '<aside class="callout callout-exam">'
-            '<p class="callout-label">Örnek alınan soru</p>'
+            '<p class="callout-label">Source question</p>'
             f"<blockquote>{_blok(q.modeled_on)}</blockquote></aside>"
         )
     parcalar.append("</section>")
@@ -91,42 +69,42 @@ def _cevap_html(q: PracticeQuestion) -> str:
 
 
 def _kunye(exam: PracticeExam) -> str:
-    ne = [f"<strong>{len(exam.questions)}</strong> soru"]
+    ne = [f"<strong>{len(exam.questions)}</strong> questions"]
     if exam.total_points:
-        ne.append(f"<strong>{exam.total_points}</strong> puan")
+        ne.append(f"<strong>{exam.total_points}</strong> points")
     if exam.duration_minutes:
-        ne.append(f"<strong>{exam.duration_minutes}</strong> dakika")
+        ne.append(f"<strong>{exam.duration_minutes}</strong> minutes")
     ne.append(_html.escape(exam.language))
     return " · ".join(ne)
 
 
 def practice_to_html(exam: PracticeExam, *, nav_html: str = "") -> str:
-    """PracticeExam → tam HTML sayfası."""
+    """Convert a PracticeExam into a complete HTML page."""
     ust = []
     if exam.profile:
         ust.append(f'<p class="exam-profile">{_html.escape(exam.profile)}</p>')
     if exam.source_exam:
         dayanakli = len(exam.grounded)
         ust.append(
-            '<p class="exam-source">Örnek alınan kâğıt: '
+            '<p class="exam-source">Paper used as a template: '
             f"<b>{_html.escape(exam.source_exam)}</b> — "
-            f"{dayanakli}/{len(exam.questions)} soru oradaki bir soruya "
-            "dayanıyor ve alıntısı cevap anahtarında."
+            f"{dayanakli}/{len(exam.questions)} questions are grounded in a quoted "
+            "source question shown in the answer key."
         )
     govde = (
         "".join(ust)
         + "".join(_soru_html(q) for q in exam.questions)
-        + '<section class="exam-key"><h2>Cevap anahtarı</h2>'
+        + '<section class="exam-key"><h2>Answer key</h2>'
         + "".join(_cevap_html(q) for q in exam.questions)
         + "</section>"
     )
     return build_page(
-        title=f"{exam.lecture_title} — deneme sınavı",
+        title=f"{exam.lecture_title} — practice exam",
         body_html=govde,
         meta=_kunye(exam),
         toc_html="",
         nav_html=nav_html,
-        eyebrow="Deneme sınavı · geçmiş kâğıda göre üretildi",
+        eyebrow="Practice exam · modeled on a past paper",
     )
 
 
@@ -137,13 +115,9 @@ def render_practice(
     nav_html: str = "",
     save_html: str | Path | None = None,
 ) -> Path:
-    """PDF basar; `save_html` verilirse aynı HTML'i diske de yazar.
-
-    Ders notundaki gerekçenin aynısı: okuyucu bu dosyayı sunuyor, iki kez
-    render etmenin karşılığı yok.
-    """
+    """Render a PDF and optionally save the same HTML used by the reader."""
     if not assets_available():
-        raise RenderError("KaTeX varlıkları yok. Çalıştır: python scripts/vendor_katex.py")
+        raise RenderError("KaTeX assets are missing. Run: python scripts/vendor_katex.py")
     sayfa = practice_to_html(exam, nav_html=nav_html)
     if save_html:
         Path(save_html).write_text(sayfa, encoding="utf-8")

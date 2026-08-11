@@ -42,8 +42,8 @@ def st(tmp_path):
 # --- süre kalibrasyonu ----------------------------------------------------
 def test_history_beats_the_fallback():
     """Sabit varsayım yalnızca ilk koşu için; sonrası kendi geçmişinden öğrenir."""
-    assert seconds_per_section("cli") == (FALLBACK_SECONDS["cli"], "tahmin")
-    assert seconds_per_section("cli", [100.0, 120.0, 110.0]) == (110.0, "geçmiş")
+    assert seconds_per_section("cli") == (FALLBACK_SECONDS["cli"], "estimate")
+    assert seconds_per_section("cli", [100.0, 120.0, 110.0]) == (110.0, "history")
 
 
 def test_median_not_mean():
@@ -83,6 +83,7 @@ def test_exam_text_enlarges_the_cached_prefix(st):
 def test_subscription_backend_has_no_dollar_cost(st):
     """Claude Pro'da token ücreti yok; kota harcanır. Fiyat göstermek yalan olur."""
     assert project(make_lecture(4), Path("yok.pdf"), st, backend="cli").cost == 0
+    assert project(make_lecture(4), Path("yok.pdf"), st, backend="codex").cost == 0
     assert project(make_lecture(4), Path("yok.pdf"), st, backend="demo").cost == 0
     assert project(make_lecture(4), Path("yok.pdf"), st, backend="api").cost > 0
 

@@ -1,8 +1,4 @@
-"""HTML → PDF (Playwright / Chromium).
-
-Aynı renderer hem web önizlemesini hem PDF'i üretiyor; iki ayrı render hattı
-bakımı yok ve kullanıcı indirdiği dosyada sürpriz yaşamıyor.
-"""
+"""HTML → PDF through Playwright and Chromium."""
 
 from __future__ import annotations
 
@@ -24,17 +20,17 @@ def document_to_html(
     book_pdf: str | Path | None = None,
     nav_html: str = "",
 ) -> str:
-    """StudyDocument → tam HTML sayfası."""
+    """Convert a StudyDocument into a complete HTML page."""
     parts: list[str] = []
     for sec in doc.sections:
-        # Her bölüm bir çıpa alır: arama sonucu doğrudan bölüme atlayabilsin.
+        # Each section has an anchor for direct search-result links.
         anchor = f'<a id="bolum-{sec.section_index}"></a>'
         if sec.error:
             a, b = sec.slide_range
             parts.append(
-                f'{anchor}<section class="failed"><strong>{sec.title or "Bölüm"}</strong> '
-                f"üretilemedi ({sec.error}). İlgili slaytlar: {a}–{b}. "
-                "Bu bölümü tek başına yeniden çalıştırabilirsin.</section>"
+                f'{anchor}<section class="failed"><strong>{sec.title or "Section"}</strong> '
+                f"could not be generated ({sec.error}). Related slides: {a}–{b}. "
+                "You can retry this section independently.</section>"
             )
             continue
         parts.append(
@@ -50,8 +46,8 @@ def document_to_html(
     ok = [s for s in doc.sections if not s.error]
     slides = [n for s in doc.sections for n in s.slide_range]
     meta = (
-        f"<strong>{len(ok)}</strong> bölüm · "
-        f"slayt {min(slides) if slides else 0}–{max(slides) if slides else 0} · "
+        f"<strong>{len(ok)}</strong> sections · "
+        f"slides {min(slides) if slides else 0}–{max(slides) if slides else 0} · "
         f"{doc.language}"
     )
     return build_page(
@@ -64,12 +60,12 @@ def document_to_html(
 
 
 def html_to_pdf(html: str, out_path: str | Path, *, timeout_ms: int = 60_000) -> Path:
-    """HTML'i PDF'e basar. KaTeX render'ının bitmesini bekler."""
+    """Print HTML to PDF after KaTeX finishes rendering."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:  # pragma: no cover
         raise RenderError(
-            "Playwright kurulu değil. Kur: pip install playwright && playwright install chromium"
+            "Playwright is not installed. Run: pip install playwright && playwright install chromium"
         ) from exc
 
     # file:// URI mutlak yol ister; göreli yol .as_uri() ile patlar.
@@ -125,14 +121,10 @@ def render_document(
     nav_html: str = "",
     save_html: str | Path | None = None,
 ) -> Path:
-    """PDF basar; `save_html` verilirse aynı HTML'i diske de yazar.
-
-    Okuyucu bu dosyayı sunuyor. İkinci kez render etmek şekilleri kitaptan
-    yeniden kırpmak demek olurdu (saniyeler); tek render, iki tüketici.
-    """
+    """Render a PDF and optionally save the same HTML used by the reader."""
     if not assets_available():
         raise RenderError(
-            "KaTeX varlıkları yok. Çalıştır: python scripts/vendor_katex.py"
+            "KaTeX assets are missing. Run: python scripts/vendor_katex.py"
         )
     html = document_to_html(
         doc, lecture_pdf=lecture_pdf, book_pdf=book_pdf, nav_html=nav_html

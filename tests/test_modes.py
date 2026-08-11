@@ -35,7 +35,7 @@ CHUNK = BookChunk(
 def request_for(**kw) -> str:
     lec = make_lecture()
     card = TopicCard(section_index=0, title="Konu")
-    kw.setdefault("language", "Türkçe")
+    kw.setdefault("language", "English")
     return build_section_request(lec.sections[0], card, [CHUNK], kw.pop("language"), **kw)
 
 
@@ -47,15 +47,15 @@ def test_every_depth_is_accepted(depth):
 
 def test_depths_produce_different_prompts():
     """Aksi halde arayüzdeki seçim hiçbir şey yapmıyor demektir."""
-    özet, derin = request_for(depth="özet"), request_for(depth="derin")
-    assert özet != derin
-    assert "ÖZET" in özet and "ÖZET" not in derin
-    assert "DERİN" in derin
+    summary, deep = request_for(depth="summary"), request_for(depth="deep")
+    assert summary != deep
+    assert "DEPTH: SUMMARY" in summary and "DEPTH: SUMMARY" not in deep
+    assert "DEPTH: DEEP" in deep
 
 
-def test_standart_adds_no_depth_directive():
+def test_standard_adds_no_depth_directive():
     """Varsayılan davranış sistem promptunda; tekrar etmek onu zayıflatır."""
-    assert "DERİNLİK:" not in request_for(depth="standart")
+    assert "DEPTH:" not in request_for(depth="standard")
 
 
 # --- Ek anlatım -------------------------------------------------------------
@@ -65,10 +65,10 @@ def test_each_extra_reaches_the_prompt(extra):
 
 
 def test_unselected_extras_are_absent():
-    text = request_for(extras=["soru"])
-    assert "::: soru" in text
-    assert "::: analoji" not in text
-    assert "::: sözlük" not in text
+    text = request_for(extras=["quiz"])
+    assert "::: quiz" in text
+    assert "::: analogy" not in text
+    assert "::: glossary" not in text
 
 
 def test_unknown_extra_is_ignored_not_crashed():
@@ -76,22 +76,22 @@ def test_unknown_extra_is_ignored_not_crashed():
 
 
 def test_extras_combine():
-    text = request_for(extras=["analoji", "soru", "sözlük"])
-    for marker in ("::: analoji", "::: soru", "::: sözlük"):
+    text = request_for(extras=["analogy", "quiz", "glossary"])
+    for marker in ("::: analogy", "::: quiz", "::: glossary"):
         assert marker in text
 
 
 # --- Dil --------------------------------------------------------------------
-@pytest.mark.parametrize("lang", ["Türkçe", "English", "Deutsch"])
+@pytest.mark.parametrize("lang", ["English", "Turkish", "Deutsch"])
 def test_language_reaches_the_prompt(lang):
-    assert f"Bu bölümü {lang} dilinde yaz" in request_for(language=lang)
+    assert f"Write this section in {lang}" in request_for(language=lang)
 
 
 def test_citation_markers_are_protected_from_translation():
     """`[K: ...]` regex ile ayrıştırılıyor; çevrilirse atıf zinciri kopar."""
     text = request_for(language="English")
-    assert "harfi harfine" in text
-    assert "[K: ...]" in text
+    assert "preserve" in text
+    assert "[B: ...]" in text
 
 
 # --- Cache bütünlüğü --------------------------------------------------------
@@ -104,7 +104,7 @@ def test_every_option_has_a_user_facing_explanation():
     assert set(DEPTH_HELP) == set(DEPTHS)
     assert set(EXTRA_HELP) == set(EXTRAS)
     for metin in (*DEPTH_HELP.values(), *EXTRA_HELP.values()):
-        assert len(metin) > 40, "açıklama bir şey anlatacak kadar uzun olmalı"
+        assert len(metin) > 40, "help text should explain the option"
 
 
 def test_analogy_help_states_the_limit_rule():
@@ -112,19 +112,19 @@ def test_analogy_help_states_the_limit_rule():
     kullanıcı seçeneği sıradan bir benzetme sanır."""
     from dersnotu.llm.prompts import EXTRA_HELP
 
-    assert "BOZULDUĞUNU" in EXTRA_HELP["analoji"]
-    assert "bozulur" in EXTRAS["analoji"]  # direktifin kendisi de
+    assert "breaks down" in EXTRA_HELP["analogy"]
+    assert "fails" in EXTRAS["analogy"]
 
 
 def test_backend_status_explains_each_option():
     from dersnotu.llm import backend_status
 
     b = backend_status()
-    for key in ("api", "cli", "demo"):
+    for key in ("api", "cli", "codex", "demo"):
         assert len(b[key]["help"]) > 40
     # Abonelik yolunun iki gerçeği kullanıcıya söylenmeli: ücretsiz ama yavaş.
-    assert "kota" in b["cli"]["help"]
-    assert "yavaş" in b["cli"]["help"]
+    assert "quota" in b["cli"]["help"]
+    assert "slower" in b["cli"]["help"]
 
 
 def test_directives_do_not_touch_the_system_prompt():
@@ -142,5 +142,5 @@ def test_cached_prefix_is_identical_across_depths_and_languages():
     assert build_lecture_context(lec) == build_lecture_context(lec)
     # Direktifler önekte DEĞİL, gövdede.
     prefix_text = build_cached_prefix(lec)[0]["text"]
-    for line in build_output_directives("English", "derin", ["soru"]):
+    for line in build_output_directives("English", "deep", ["quiz"]):
         assert line not in prefix_text
