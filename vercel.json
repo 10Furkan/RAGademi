@@ -3,6 +3,10 @@
   "framework": null,
   "rewrites": [
     {
+      "source": "/",
+      "destination": "https://ragademi.onrender.com/"
+    },
+    {
       "source": "/:path*",
       "destination": "https://ragademi.onrender.com/:path*"
     }
