@@ -32,7 +32,7 @@ header{padding:34px 0 22px}
 <body>
 <div class="wrap">
   <header>
-    <a class="back" href="/">← My Courses</a>
+    <a class="back" href="/">← My Courses</a> · <a class="back" href="/public">Shared studies</a>
     <div class="title">
       <span class="kod" id="kod" hidden></span>
       <h1 id="ad">…</h1>
@@ -62,8 +62,9 @@ header{padding:34px 0 22px}
         <div class="panel-head">
           <h2>Materials</h2>
         </div>
-        <p class="sub">Upload once and reuse in every document. The textbook is indexed
-           on first use; later generations reuse the ready index.</p>
+        <p class="sub">Select several PDFs at once or drop them into the matching area.
+           Uploads are private and reusable. A textbook is indexed on first use.</p>
+        <p class="hint" id="uploadLimits" hidden></p>
         <div class="grid3">
           <div>
             <div class="colhead">
@@ -71,9 +72,9 @@ header{padding:34px 0 22px}
               <span class="lab" id="saySlayt"></span>
             </div>
             <div class="rows" id="lectures"></div>
-            <div class="drop slim" id="d-lecture">
-              <input type="file" accept="application/pdf" data-kind="lecture">
-              <span class="name">+ Upload slide PDF</span>
+            <div class="drop slim" id="d-lecture" role="button" tabindex="0" aria-label="Upload or drop slide PDFs">
+              <input type="file" accept=".pdf,application/pdf" data-kind="lecture" multiple>
+              <span class="name">+ Select or drop slide PDFs</span>
             </div>
           </div>
           <div>
@@ -82,9 +83,9 @@ header{padding:34px 0 22px}
               <span class="lab" id="sayKitap"></span>
             </div>
             <div class="rows" id="books"></div>
-            <div class="drop slim" id="d-book">
-              <input type="file" accept="application/pdf" data-kind="book">
-              <span class="name">+ Upload textbook PDF</span>
+            <div class="drop slim" id="d-book" role="button" tabindex="0" aria-label="Upload or drop textbook PDFs">
+              <input type="file" accept=".pdf,application/pdf" data-kind="book" multiple>
+              <span class="name">+ Select or drop textbook PDFs</span>
             </div>
           </div>
           <div>
@@ -93,9 +94,9 @@ header{padding:34px 0 22px}
               <span class="lab" id="saySinav"></span>
             </div>
             <div class="rows" id="exams"></div>
-            <div class="drop slim" id="d-exam">
-              <input type="file" accept="application/pdf" data-kind="exam">
-              <span class="name">+ Upload exam PDF</span>
+            <div class="drop slim" id="d-exam" role="button" tabindex="0" aria-label="Upload or drop past exam PDFs">
+              <input type="file" accept=".pdf,application/pdf" data-kind="exam" multiple>
+              <span class="name">+ Select or drop exam PDFs</span>
             </div>
             <p class="hint">Optional. It does not change scope; it gives more depth to
                slide topics that have appeared in past exams.</p>
@@ -202,6 +203,8 @@ header{padding:34px 0 22px}
           <h2>Generated documents</h2>
           <span class="lab" id="sayNot"></span>
         </div>
+        <p class="sub">Only documents you publish appear on the <a href="/public">public page</a>. Uploaded source PDFs remain private.</p>
+        <p class="hint" id="shareStatus" role="status" aria-live="polite"></p>
         <div class="search">
           <input type="text" id="q" autocomplete="off"
                  placeholder="Search study notes and practice questions — e.g. two's complement">
@@ -251,6 +254,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g,
 
 const outEl = $("#out"), metaEl = $("#meta"), dlEl = $("#dl");
 let ders = null, sections = {}, calisiyor = false;
+let uploadLimits = null;
 
 const boyut = b => b > 1048576 ? (b / 1048576).toFixed(1) + " MB"
                                : Math.max(1, Math.round(b / 1024)) + " KB";
@@ -352,9 +356,11 @@ function dokumanHTML(d){
   // Both document types share this list and are distinguished by metadata.
   const alt = sinav
     ? [tarih(d.created_at), `${d.sections} questions`,
+       d.is_public ? "public" : "private",
        d.backend === "demo" ? "demo" : null,
        d.duration ? sure(d.duration) : null].filter(Boolean).join(" · ")
     : [tarih(d.created_at), d.depth, (d.extras || []).join(", "),
+       d.is_public ? "public" : "private",
        d.exam_id ? "exam-focused" : null,
        d.backend === "demo" ? "demo" : null,
        d.duration ? sure(d.duration) : null,
@@ -363,6 +369,8 @@ function dokumanHTML(d){
     d.has_html ? `<a class="act oku" href="/ders/${CID}/not/${d.id}">read</a>` : "",
     d.has_pdf ? `<a class="act" href="/api/documents/${d.id}/download">pdf</a>` : "",
     d.has_md ? `<a class="act" href="/api/documents/${d.id}/download?fmt=md">md</a>` : "",
+    d.has_pdf ? `<button class="act" type="button" data-public="${d.id}" data-value="${d.is_public ? "false" : "true"}">${d.is_public ? "Make private" : "Publish"}</button>` : "",
+    d.is_public ? `<button class="act" type="button" data-copy="${d.id}">copy link</button>` : "",
     d.can_retry ? `<button class="act" type="button" data-retrydoc="${d.id}">complete</button>` : "",
     `<button class="act" type="button" data-deldoc="${d.id}" data-name="${esc(d.title)}">delete</button>`,
   ].join("");
@@ -383,6 +391,8 @@ function cizDokuman(){
   $("#sayNot").textContent = ders.documents.length || "";
   $$("[data-deldoc]").forEach(b => b.addEventListener("click", silDokuman));
   $$("[data-retrydoc]").forEach(b => b.addEventListener("click", tamamla));
+  $$("[data-public]").forEach(b => b.addEventListener("click", yayinla));
+  $$("[data-copy]").forEach(b => b.addEventListener("click", kopyala));
 }
 
 function cizOzet(){
@@ -529,33 +539,79 @@ function kotaMetni(q){
 // Derive upload handlers from the drop zones themselves.
 for (const box of $$(".drop")) {
   const input = box.querySelector("input");
-  box.addEventListener("click", () => input.click());
+  box.addEventListener("click", e => { if (e.target !== input) input.click(); });
+  box.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); }
+  });
   box.addEventListener("dragover", e => { e.preventDefault(); box.classList.add("over"); });
-  box.addEventListener("dragleave", () => box.classList.remove("over"));
+  box.addEventListener("dragleave", e => {
+    if (!box.contains(e.relatedTarget)) box.classList.remove("over");
+  });
   box.addEventListener("drop", e => {
     e.preventDefault(); box.classList.remove("over");
-    input.files = e.dataTransfer.files; input.dispatchEvent(new Event("change"));
+    if (e.dataTransfer.files.length) gonder(box, input.dataset.kind, [...e.dataTransfer.files]);
   });
-  input.addEventListener("change", () => input.files[0] && gonder(box, input));
+  input.addEventListener("change", () => {
+    if (input.files.length) gonder(box, input.dataset.kind, [...input.files]);
+    input.value = "";
+  });
 }
 
-async function gonder(box, input){
-  const f = input.files[0], etiket = box.querySelector(".name");
+async function gonder(box, kind, files){
+  if (uploadLimits) {
+    const tooLarge = files.find(f => f.size > uploadLimits.max_upload_mb * 1024 * 1024);
+    if (tooLarge) { alert(`${tooLarge.name}: maximum PDF size is ${uploadLimits.max_upload_mb} MB.`); return; }
+    if (files.length > uploadLimits.max_batch_files) {
+      alert(`Select at most ${uploadLimits.max_batch_files} PDFs.`); return;
+    }
+    if (files.reduce((total, f) => total + f.size, 0) > uploadLimits.max_batch_total_mb * 1024 * 1024) {
+      alert(`Maximum batch size is ${uploadLimits.max_batch_total_mb} MB.`); return;
+    }
+  }
+  const etiket = box.querySelector(".name");
   const eski = etiket.textContent;
-  etiket.textContent = `Uploading ${f.name}…`;
+  etiket.textContent = `Uploading ${files.length} PDF${files.length === 1 ? "" : "s"}…`;
   box.classList.add("has");
   const fd = new FormData();
-  fd.set("kind", input.dataset.kind); fd.set("file", f);
+  fd.set("kind", kind);
+  for (const file of files) fd.append("files", file);
   try {
-    const r = await fetch(`/api/courses/${CID}/materials`, { method: "POST", body: fd });
+    const r = await fetch(`/api/courses/${CID}/materials/batch`, { method: "POST", body: fd });
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const result = await r.json();
     await yukle();
+    if (result.errors.length) alert("Some files could not be uploaded:\n" +
+      result.errors.map(e => `${e.name}: ${e.error}`).join("\n"));
   } catch (err) {
     alert("Upload failed: " + err.message);
   } finally {
     etiket.textContent = eski; box.classList.remove("has");
-    input.value = "";  // allow selecting the same file again
   }
+}
+
+const publicUrl = id => `${location.origin}/api/public/documents/${id}/pdf`;
+async function kopyala(e){
+  const url = publicUrl(e.currentTarget.dataset.copy);
+  try {
+    await navigator.clipboard.writeText(url);
+    $("#shareStatus").textContent = "Public PDF link copied.";
+  } catch {
+    prompt("Copy this public PDF link:", url);
+  }
+}
+async function yayinla(e){
+  const { public: id, value } = e.currentTarget.dataset;
+  const isPublic = value === "true";
+  if (isPublic && !confirm("Publish this generated PDF for anyone to read? Check that you have the right to share its content and figures.")) return;
+  const r = await fetch(`/api/documents/${id}/publication`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_public: isPublic }),
+  });
+  if (!r.ok) { alert("Sharing could not be changed."); return; }
+  await yukle();
+  $("#shareStatus").textContent = isPublic
+    ? "Published. Use Copy link to share this PDF."
+    : "The document is private again.";
 }
 
 // --- deletion -------------------------------------------------------------
@@ -621,6 +677,12 @@ function yardimBagla(){
 
 // --- model access paths ---------------------------------------------------
 fetch("/api/health").then(r => r.json()).then(h => {
+  uploadLimits = h;
+  $("#uploadLimits").hidden = false;
+  $("#uploadLimits").textContent = `Maximum ${h.max_upload_mb} MB per PDF · ${h.max_batch_total_mb} MB per batch.`;
+  for (const box of $$(".drop")) {
+    box.title = `Maximum ${h.max_upload_mb} MB per PDF; ${h.max_batch_total_mb} MB per batch.`;
+  }
   const b = h.backends || {};
   Object.assign(YARDIM.depth, h.depth_help || {});
   Object.assign(YARDIM.extras, h.extra_help || {});
@@ -729,8 +791,10 @@ function bitti(){
 // Follow initial generations and retries through the same live event stream.
 function follow(job){
   const es = new EventSource(`/api/jobs/${job.id}/events`);
-  es.onmessage = ev => {
-    const d = JSON.parse(ev.data);
+  let ended = false, polling = false;
+  const stop = () => { ended = true; es.close(); clearInterval(statusTimer); };
+  const receive = d => {
+    if (ended) return;
     const [group] = d.type.split(":");
 
     if (d.type === "section:delta") {
@@ -760,6 +824,7 @@ function follow(job){
       drawSteps(); return;
     }
     if (d.type === "job:done") {
+      stop();
       Object.values(state).forEach(s => { s.done = true; s.active = false; });
       state.render = { done: true, detail: "ready" };
       drawSteps();
@@ -775,13 +840,36 @@ function follow(job){
       yukle();  // refresh generated-document list
     }
     if (d.type === "job:failed") {
+      stop();
       outEl.className = "out";
       outEl.innerHTML = `<div class="err">${esc(d.error)}</div>`;
       bitti();
     }
-    if (d.type === "stream:end") es.close();
+    if (d.type === "stream:end") stop();
   };
-  es.onerror = () => { es.close(); bitti(); };
+  es.onmessage = ev => receive(JSON.parse(ev.data));
+  // Recover proxy stream interruptions without treating a running job as done.
+  // This status request also handles a server restart where the live job is gone.
+  async function status(){
+    if (ended || polling) return;
+    polling = true;
+    try {
+      const r = await fetch(`/api/jobs/${job.id}`);
+      if (r.status === 404) {
+        stop(); bitti();
+        outEl.className = "out";
+        outEl.innerHTML = '<div class="err">The server restarted and this live job is no longer available. Check Generated documents for saved work.</div>';
+        yukle(); return;
+      }
+      if (!r.ok) return;
+      const current = await r.json();
+      if (current.status === "done") receive({ ...current, type: "job:done" });
+      else if (current.status === "failed") receive({ ...current, type: "job:failed" });
+    } catch { /* EventSource and the next status request will retry. */ }
+    finally { polling = false; }
+  }
+  const statusTimer = setInterval(status, 30000);
+  es.onerror = status;
 }
 
 // --- complete missing sections ------------------------------------------

@@ -6,6 +6,7 @@ Chromium ile PDF basar (~10 sn).
 
 from __future__ import annotations
 
+import base64
 import time
 from pathlib import Path
 
@@ -253,6 +254,68 @@ def _material(client, cid, kind, name="a.pdf"):
     )
     assert r.status_code == 200, r.text
     return r.json()
+
+
+def test_batch_upload_accepts_multiple_pdfs_and_reports_bad_files(client):
+    c = _course(client)
+    r = client.post(
+        f"/api/courses/{c['id']}/materials/batch",
+        data={"kind": "lecture"},
+        files=[
+            ("files", ("first.pdf", b"%PDF-first", "application/pdf")),
+            ("files", ("second.pdf", b"%PDF-second", "application/pdf")),
+            ("files", ("notes.txt", b"not pdf", "text/plain")),
+        ],
+    )
+    assert r.status_code == 200, r.text
+    assert len(r.json()["uploaded"]) == 2
+    assert [e["name"] for e in r.json()["errors"]] == ["notes.txt"]
+    assert len(client.get(f"/api/courses/{c['id']}").json()["lectures"]) == 2
+
+
+def test_publication_is_opt_in_and_reversible(client, tmp_path):
+    from dersnotu.api import server
+
+    c = _course(client)
+    pdf = tmp_path / "study.pdf"
+    pdf.write_bytes(b"%PDF-public-note")
+    doc = server.library.add_document(course_id=c["id"], title="Study", pdf_path=pdf)
+    url = f"/api/public/documents/{doc.id}/pdf"
+    assert client.get("/api/public/documents").json() == []
+    assert client.get(url).status_code == 404
+
+    published = client.patch(
+        f"/api/documents/{doc.id}/publication", json={"is_public": True}
+    )
+    assert published.status_code == 200
+    assert published.json()["is_public"] is True
+    assert client.get("/api/public/documents").json()[0]["title"] == "Study"
+    assert client.get(url).content == b"%PDF-public-note"
+
+    # Replacing a failed document during retry keeps the owner's choice.
+    server.library.add_document(id=doc.id, course_id=c["id"], title="Study", pdf_path=pdf)
+    assert server.library.document(doc.id).is_public is True
+    client.patch(f"/api/documents/{doc.id}/publication", json={"is_public": False})
+    assert client.get("/api/public/documents").json() == []
+    assert client.get(url).status_code == 404
+
+
+def test_admin_password_protects_private_routes_but_not_public_gallery(
+    client, monkeypatch
+):
+    from dersnotu.api import server
+
+    monkeypatch.setattr(server.settings, "admin_password", "secret-password")
+    assert client.get("/").status_code == 401
+    assert client.get("/api/courses").status_code == 401
+    assert client.get("/public").status_code == 200
+    assert client.get("/api/public/documents").status_code == 200
+    token = base64.b64encode(b"admin:secret-password").decode()
+    headers = {"Authorization": f"Basic {token}"}
+    assert client.get("/api/courses", headers=headers).status_code == 200
+    assert client.post("/api/courses", json={"name": "X"}, headers={
+        **headers, "Origin": "https://other.example"
+    }).status_code == 403
 
 
 def test_course_create_list_delete(client):

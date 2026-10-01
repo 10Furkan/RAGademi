@@ -21,6 +21,9 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "python-multipart>=0.0.12",
+    # Optional cloud library: PostgreSQL and private S3-compatible storage.
+    "pg8000>=1.31",
+    "boto3>=1.36",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +31,7 @@ dev = ["pytest>=8.3", "ruff>=0.8"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/dersnotu/assets" = "dersnotu/assets"
+"src/dersnotu/api/static" = "dersnotu/api/static"
 
 [project.scripts]
 dersnotu = "dersnotu.cli:app"

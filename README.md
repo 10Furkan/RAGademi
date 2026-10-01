@@ -106,6 +106,73 @@ optionally a past exam, then choose the materials when generating a document.
 Materials are content-addressed: adding the same textbook to multiple courses
 does not duplicate the file or rebuild its index.
 
+Each material area accepts multiple PDFs in one selection or by drag and drop.
+Generated study notes and practice exams are private by default. Use **Publish**
+on an individual document to add its PDF to `/public`, then **Copy link** to
+share it. **Make private** removes it from the public page and blocks that link.
+The uploaded source PDFs are never exposed by the public endpoints.
+
+## Publish as a website
+
+### Deploy free with Render, Supabase and Vercel
+
+Render Free runs the complete FastAPI application using a temporary working
+directory. Supabase Free keeps library metadata in PostgreSQL and uploaded
+PDFs plus generated documents in a private Storage bucket. Vercel forwards
+the website's requests to Render so the browser uses one origin for the UI
+and API. No paid Render service or persistent Render disk is needed.
+
+1. Create a Supabase Free project and a **private** bucket named `ragademi`.
+   Copy the PostgreSQL **Session pooler** URL, and Storage S3 endpoint,
+   region and generated key pair. Follow [the full setup guide](docs/deploy-free.md).
+2. Push the project to GitHub. In Render, choose **New → Blueprint**, select
+   the repository, and apply `render.yaml`. Fill in its cloud connection
+   variables and a long, unique `DERSNOTU_ADMIN_PASSWORD`. The Blueprint uses
+   the **free** compute plan in Frankfurt, without a persistent disk.
+   Set `ANTHROPIC_API_KEY` for real API generation or leave it empty for demo
+   output. The container does not include a signed-in subscription CLI session.
+3. Wait for Render to finish deploying, then copy the service's HTTPS URL, for
+   example `https://ragademi-example.onrender.com`.
+4. In Vercel, import the same GitHub repository. Set the Framework Preset to
+   **Other**, and add `RENDER_ORIGIN` with the Render HTTPS URL for Production
+   and Preview environments. Deploy the project.
+5. Open the Vercel deployment URL. The owner interface asks for username
+   `admin` and the password configured in Render. Public documents are at
+   `/public`; only documents you publish there are visible without signing in.
+6. If you own a domain, add it to the Vercel project and follow Vercel's DNS
+   instructions. Visitors can then use that domain instead of the generated
+   Vercel URL.
+
+Supabase Free allows 1 GB of files, a 500 MB database, and 50 MB per file. Render
+Free sleeps when idle and has 512 MB RAM; it can interrupt an unfinished run.
+Completed documents remain in Supabase. The course page reconnects progress
+streams and polls active job status to recover Vercel proxy interruptions.
+Vercel's maximum proxy request duration is 120 seconds; use Render's URL
+directly if a long request is interrupted. Free hosting does not cover model
+API charges. See the guide for current quota references and a read-only
+preflight/import tool for an existing local library.
+
+### Deploy on a VPS with Docker Compose
+
+The included Docker Compose setup runs RAGademi behind Caddy with HTTPS and a
+persistent data volume. It is designed for a VPS or other host with Docker
+Compose, a domain, and inbound ports 80 and 443.
+
+1. Point your domain's DNS A/AAAA record to the host.
+2. Copy `.env.example` to `.env`. Set `DOMAIN` and a long, unique
+   `DERSNOTU_ADMIN_PASSWORD`. Set `ANTHROPIC_API_KEY` if you want real model
+   output on this server; demo mode needs no key.
+3. Run `docker compose up -d --build` from the repository directory.
+4. Open `https://<your-domain>/` and sign in as `admin` with that password.
+   The public gallery at `https://<your-domain>/public` needs no sign-in.
+
+The owner password protects courses, source PDFs, generation, downloads, and
+deletion. Public visitors can see and open only PDFs that you explicitly
+publish. Check the rights to share text and figures in a generated document
+before publishing it. The `/data` Docker volume holds the SQLite library,
+uploads, indexes, and generated files; include this volume in backups. There
+are no visitor accounts or public uploads in this version.
+
 Before generation, the interface estimates section count, tokens, cost, and
 duration. Duration estimates calibrate themselves from previous runs. For
 subscription-based execution, the interface reports quota rather than a false

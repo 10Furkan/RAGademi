@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared studies — RAGademi</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+.public-head{padding:54px 0 28px}
+.public-head h1{font-size:clamp(30px,4vw,48px);margin:12px 0}
+.public-head p{color:var(--muted);max-width:65ch;line-height:1.6}
+.public-links{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.public-links a{color:var(--ink)}
+.public-list{display:grid;gap:12px;margin:24px 0 60px}
+.public-card{border:1px solid var(--rule);background:var(--surface);padding:20px;border-radius:5px}
+.public-card h2{font-size:19px;margin:5px 0 8px}
+.public-card p{color:var(--muted);margin:0 0 15px}
+.public-card .act{display:inline-block}
+.public-meta{font-size:12px;color:var(--muted)}
+.public-search{width:100%;max-width:460px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="public-head">
+    <div class="public-links"><strong>RAGademi</strong><span>Shared studies</span><a href="/">Owner sign-in</a></div>
+    <h1>Shared study materials</h1>
+    <p>Study notes and practice exams their owner has chosen to share. Source PDFs stay in the owner's private course library.</p>
+  </header>
+  <main>
+    <input class="public-search" id="search" type="search" placeholder="Search shared studies" aria-label="Search shared studies">
+    <div class="public-list" id="list" aria-live="polite">Loading…</div>
+  </main>
+</div>
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let documents = [];
+function render(){
+  const query = document.querySelector("#search").value.trim().toLocaleLowerCase();
+  const visible = documents.filter(d =>
+    `${d.title} ${d.course_name} ${d.kind}`.toLocaleLowerCase().includes(query));
+  document.querySelector("#list").innerHTML = visible.length
+    ? visible.map(d => `<article class="public-card">
+        <span class="public-meta">${d.kind === "practice" ? "Practice exam" : "Study notes"} · ${esc(d.course_name)}</span>
+        <h2>${esc(d.title)}</h2>
+        <p>${esc(d.language || "")}${d.sections ? ` · ${d.sections} ${d.kind === "practice" ? "questions" : "sections"}` : ""}</p>
+        <a class="act" href="/api/public/documents/${encodeURIComponent(d.id)}/pdf" target="_blank" rel="noopener">Open PDF</a>
+      </article>`).join("")
+    : `<p class="empty-note">${query ? "No matching studies." : "Nothing has been shared yet."}</p>`;
+}
+document.querySelector("#search").addEventListener("input", render);
+fetch("/api/public/documents")
+  .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+  .then(data => { documents = data; render(); })
+  .catch(() => { document.querySelector("#list").textContent = "Shared studies could not be loaded."; });
+</script>
+</body>
+</html>

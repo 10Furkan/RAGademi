@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -48,6 +50,26 @@ class Settings(BaseSettings):
     # --- Library --------------------------------------------------------
     # Persistent courses, uploaded materials, and generated documents.
     library_name: str = "library.sqlite"
+    library_backend: Literal["sqlite", "postgres"] = "sqlite"
+    database_url: SecretStr = SecretStr("")
+    s3_endpoint: str = ""
+    s3_region: str = ""
+    s3_bucket: str = "ragademi"
+    s3_access_key: SecretStr = SecretStr("")
+    s3_secret_key: SecretStr = SecretStr("")
+    s3_max_file_mb: int = Field(50, gt=0)
+    max_workers: int = Field(2, ge=1, le=4)
+    # Required when the web interface listens beyond localhost.
+    admin_password: str = ""
+    max_upload_mb: int = 200
+    max_batch_files: int = 20
+    max_batch_total_mb: int = 500
+
+    @model_validator(mode="after")
+    def cap_cloud_uploads(self):
+        if self.library_backend == "postgres":
+            self.max_upload_mb = min(self.max_upload_mb, self.s3_max_file_mb)
+        return self
 
     @property
     def library_path(self) -> Path:

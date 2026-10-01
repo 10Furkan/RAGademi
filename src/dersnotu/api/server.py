@@ -10,21 +10,25 @@ ders sayfasında durur ve yeniden denenebilir.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
-import shutil
+import secrets
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from ..cloud_library import make_library
 from ..config import settings
 from ..estimate import project, project_practice
 from ..index import BookIndex
-from ..library import KINDS, LibraryStore, Material, NotFound
+from ..library import KINDS, Material, NotFound
 from ..llm import (
     BACKENDS,
     ClaudeCodeClient,
@@ -54,13 +58,14 @@ from ..practice import save_debug as save_practice_debug
 from ..practice import to_markdown as practice_to_markdown
 from ..render import render_document, render_practice
 from ..render.html import build_nav
+from ..storage import StorageError
 from .jobs import Event, Job, JobStatus, JobStore
 
 STATIC = Path(__file__).resolve().parent / "static"
 UPLOADS = settings.cache_dir / "uploads"
 
-store = JobStore(max_workers=2)
-library = LibraryStore(settings.library_path, settings.materials_dir)
+store = JobStore(max_workers=settings.max_workers)
+library = make_library(settings)
 
 
 @asynccontextmanager
@@ -73,6 +78,52 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="dersnotu", lifespan=lifespan)
+
+
+@app.exception_handler(StorageError)
+async def storage_unavailable(request: Request, exc: StorageError):
+    return JSONResponse({"detail": str(exc)}, status_code=503, headers={"Retry-After": "30"})
+
+
+@app.middleware("http")
+async def admin_access(request: Request, call_next):
+    """Keep source PDFs, courses and paid model calls behind owner credentials."""
+    path = request.url.path
+    public = (
+        path == "/public" or path.startswith("/public/")
+        or path == "/healthz"
+        or path == "/api/public/documents"
+        or path.startswith("/api/public/documents/")
+        or path.startswith("/static/")
+    )
+    if settings.admin_password and not public:
+        token = request.headers.get("authorization", "")
+        try:
+            scheme, encoded = token.split(" ", 1)
+            username, password = base64.b64decode(encoded, validate=True).decode().split(":", 1)
+        except (ValueError, UnicodeDecodeError, binascii.Error):
+            scheme, username, password = "", "", ""
+        valid = (
+            scheme.lower() == "basic"
+            and secrets.compare_digest(username, "admin")
+            and secrets.compare_digest(password, settings.admin_password)
+        )
+        if not valid:
+            return Response(
+                "Administrator login required.", status_code=401,
+                headers={"WWW-Authenticate": 'Basic realm="RAGademi"'},
+            )
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            if request.headers.get("sec-fetch-site") == "cross-site":
+                return Response("Cross-site request rejected.", status_code=403)
+            origin = request.headers.get("origin")
+            forwarded_host = request.headers.get("x-forwarded-host", request.headers.get("host"))
+            if origin and origin.split("://", 1)[-1].rstrip("/") != forwarded_host:
+                return Response("Origin mismatch.", status_code=403)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +398,10 @@ class CoursePatch(BaseModel):
     note: str | None = None
 
 
+class PublicationPatch(BaseModel):
+    is_public: bool
+
+
 def _material_dict(m: Material) -> dict:
     d = m.to_dict()
     if m.kind == "book":
@@ -357,12 +412,12 @@ def _material_dict(m: Material) -> dict:
 
 
 @app.get("/api/courses")
-async def list_courses() -> list[dict]:
+def list_courses() -> list[dict]:
     return [c.to_dict() for c in library.courses()]
 
 
 @app.post("/api/courses")
-async def create_course(body: CourseIn) -> dict:
+def create_course(body: CourseIn) -> dict:
     try:
         return library.create_course(body.name, body.code, body.note).to_dict()
     except ValueError as exc:
@@ -370,7 +425,7 @@ async def create_course(body: CourseIn) -> dict:
 
 
 @app.get("/api/courses/{course_id}")
-async def get_course(course_id: str) -> dict:
+def get_course(course_id: str) -> dict:
     course = _course_or_404(course_id)
     mats = library.materials(course_id)
     return {
@@ -383,7 +438,7 @@ async def get_course(course_id: str) -> dict:
 
 
 @app.patch("/api/courses/{course_id}")
-async def patch_course(course_id: str, body: CoursePatch) -> dict:
+def patch_course(course_id: str, body: CoursePatch) -> dict:
     _course_or_404(course_id)
     try:
         return library.rename_course(
@@ -394,7 +449,7 @@ async def patch_course(course_id: str, body: CoursePatch) -> dict:
 
 
 @app.delete("/api/courses/{course_id}")
-async def delete_course(course_id: str) -> dict:
+def delete_course(course_id: str) -> dict:
     _course_or_404(course_id)
     return {"deleted": library.delete_course(course_id)}
 
@@ -405,28 +460,66 @@ async def upload_material(
     kind: str = Form(...),
     file: UploadFile = File(...),
 ) -> dict:
-    _course_or_404(course_id)
+    await asyncio.to_thread(_course_or_404, course_id)
     if kind not in KINDS:
         raise HTTPException(400, f"Invalid material type: {kind}. Options: {', '.join(KINDS)}")
-    if not (file.filename or "").lower().endswith(".pdf"):
-        raise HTTPException(400, "The file must be a PDF.")
+    return _material_dict(await _save_material(course_id, kind, file))
 
-    tmp = UPLOADS / f"up-{course_id}-{kind}.pdf"
+
+@app.post("/api/courses/{course_id}/materials/batch")
+async def upload_materials(
+    course_id: str,
+    kind: str = Form(...),
+    files: list[UploadFile] = File(...),
+) -> dict:
+    await asyncio.to_thread(_course_or_404, course_id)
+    if kind not in KINDS:
+        raise HTTPException(400, f"Invalid material type: {kind}")
+    if len(files) > settings.max_batch_files:
+        raise HTTPException(413, f"Select at most {settings.max_batch_files} PDFs at once.")
+    if sum(file.size or 0 for file in files) > settings.max_batch_total_mb * 1024 * 1024:
+        raise HTTPException(413, f"The batch exceeds {settings.max_batch_total_mb} MB.")
+    uploaded, errors = [], []
+    for file in files:
+        try:
+            uploaded.append(_material_dict(await _save_material(course_id, kind, file)))
+        except HTTPException as exc:
+            errors.append({"name": file.filename or "Unnamed file", "error": exc.detail})
+    return {"uploaded": uploaded, "errors": errors}
+
+
+async def _save_material(course_id: str, kind: str, file: UploadFile) -> Material:
+    name = Path((file.filename or "").replace("\\", "/")).name
+    if not name.lower().endswith(".pdf"):
+        await file.close()
+        raise HTTPException(400, "The file must be a PDF with a .pdf extension.")
+    tmp = UPLOADS / f"up-{uuid.uuid4().hex}.pdf"
     tmp.parent.mkdir(parents=True, exist_ok=True)
-    with tmp.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+    size = 0
     try:
-        mat = library.add_material(
-            course_id, kind, file.filename, tmp, sha256_file(tmp),
-            pages=_page_count(tmp),
-        )
+        with tmp.open("wb") as target:
+            while chunk := await file.read(1024 * 1024):
+                if size == 0 and not chunk.startswith(b"%PDF-"):
+                    raise HTTPException(400, "The file is not a PDF.")
+                size += len(chunk)
+                if size > settings.max_upload_mb * 1024 * 1024:
+                    raise HTTPException(413, f"PDF exceeds {settings.max_upload_mb} MB.")
+                target.write(chunk)
+        if not size:
+            raise HTTPException(400, "The PDF is empty.")
+        def save():
+            return library.add_material(
+                course_id, kind, name, tmp, sha256_file(tmp), pages=_page_count(tmp),
+            )
+
+        return await asyncio.to_thread(save)
     finally:
         tmp.unlink(missing_ok=True)
-    return _material_dict(mat)
+        await file.close()
 
 
 @app.delete("/api/materials/{material_id}")
-async def delete_material(material_id: str) -> dict:
+def delete_material(material_id: str) -> dict:
     try:
         used = library.material_usage(material_id)
         return {"deleted": library.delete_material(material_id), "documents": used}
@@ -435,7 +528,7 @@ async def delete_material(material_id: str) -> dict:
 
 
 @app.get("/api/materials/{material_id}/download")
-async def download_material(material_id: str) -> FileResponse:
+def download_material(material_id: str) -> FileResponse:
     try:
         mat = library.material(material_id)
     except NotFound as exc:
@@ -446,12 +539,12 @@ async def download_material(material_id: str) -> FileResponse:
 
 
 @app.get("/api/documents/{document_id}/download")
-async def download_document(document_id: str, fmt: str = "pdf") -> FileResponse:
+def download_document(document_id: str, fmt: str = "pdf") -> FileResponse:
     try:
         doc = library.document(document_id)
     except NotFound as exc:
         raise HTTPException(404, str(exc)) from exc
-    path = doc.pdf_path if fmt == "pdf" else doc.md_path
+    path = library.fetch_file(doc.pdf_path if fmt == "pdf" else doc.md_path)
     if not (path and path.exists()):
         raise HTTPException(404, "The output is missing from disk.")
     ek = "deneme-sinavi" if doc.kind == "practice" else "ders-notu"
@@ -459,15 +552,52 @@ async def download_document(document_id: str, fmt: str = "pdf") -> FileResponse:
 
 
 @app.delete("/api/documents/{document_id}")
-async def delete_document(document_id: str) -> dict:
+def delete_document(document_id: str) -> dict:
     try:
         return {"deleted": library.delete_document(document_id)}
     except NotFound as exc:
         raise HTTPException(404, str(exc)) from exc
 
 
+@app.patch("/api/documents/{document_id}/publication")
+def set_publication(document_id: str, body: PublicationPatch) -> dict:
+    try:
+        doc = library.document(document_id)
+        if body.is_public:
+            library.fetch_file(doc.pdf_path)
+        if body.is_public and not (doc.pdf_path and doc.pdf_path.is_file()):
+            raise HTTPException(409, "A PDF is required before publishing this document.")
+        return library.set_document_public(document_id, body.is_public).to_dict()
+    except NotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/public/documents")
+def list_public_documents() -> list[dict]:
+    return library.public_documents()
+
+
+@app.get("/api/public/documents/{document_id}/pdf")
+def read_public_document(document_id: str) -> FileResponse:
+    try:
+        doc = library.document(document_id)
+    except NotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    # Check publication before accessing private object storage.
+    if not doc.is_public:
+        raise HTTPException(404, "Public document not found.")
+    library.fetch_file(doc.pdf_path)
+    if not (doc.pdf_path and doc.pdf_path.is_file()):
+        raise HTTPException(404, "Public document not found.")
+    return FileResponse(
+        doc.pdf_path, media_type="application/pdf",
+        content_disposition_type="inline",
+        filename=f"{doc.title}.pdf", headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.get("/api/courses/{course_id}/search")
-async def search_course(course_id: str, q: str = "", limit: int = 20) -> dict:
+def search_course(course_id: str, q: str = "", limit: int = 20) -> dict:
     """Dersin tüm ders notlarında tam metin arama."""
     _course_or_404(course_id)
     hits = library.search(course_id, q, limit=limit) if q.strip() else []
@@ -493,7 +623,7 @@ def _parsed_lecture(mat: Material):
 
 
 @app.get("/api/estimate")
-async def estimate_run(
+def estimate_run(
     lecture_id: str,
     book_id: str,
     exam_id: str = "",
@@ -558,12 +688,15 @@ async def quota() -> dict:
 
 
 @app.get("/ders/{course_id}/not/{document_id}", response_class=HTMLResponse)
-async def read_document(course_id: str, document_id: str) -> str:
+def read_document(course_id: str, document_id: str) -> str:
     """Uygulama içi okuyucu — PDF'le birebir aynı render."""
     try:
         doc = library.document(document_id)
     except NotFound as exc:
         raise HTTPException(404, str(exc)) from exc
+    if doc.course_id != course_id:
+        raise HTTPException(404, "Document not found in this course.")
+    library.fetch_file(doc.html_path)
     if not (doc.html_path and doc.html_path.exists()):
         ne = "practice exam" if doc.kind == "practice" else "study notes"
         raise HTTPException(
@@ -575,7 +708,7 @@ async def read_document(course_id: str, document_id: str) -> str:
 
 
 @app.post("/api/documents/{document_id}/retry")
-async def retry_document(document_id: str) -> dict:
+def retry_document(document_id: str) -> dict:
     """Kalıcı dokümandan yeniden deneme.
 
     `/api/jobs/{id}/retry` yalnızca sunucu açık kaldıysa çalışır. Asıl senaryo
@@ -588,6 +721,7 @@ async def retry_document(document_id: str) -> dict:
         raise HTTPException(404, str(exc)) from exc
     if not doc.failed:
         raise HTTPException(400, "This document has no failed sections.")
+    library.fetch_file(doc.doc_path)
     if not (doc.doc_path and doc.doc_path.exists()):
         raise HTTPException(400, "The document state file is missing; it cannot be retried.")
 
@@ -655,7 +789,7 @@ def _page_count(path: Path) -> int:
 # İş uçları
 # ---------------------------------------------------------------------------
 @app.post("/api/jobs")
-async def create_job(
+def create_job(
     # İki kaynak yolu: doğrudan yükleme (kitaplıksız hızlı deneme) ya da
     # kitaplıktaki bir materyalin kimliği (ders sayfasından gelen normal yol).
     lecture: UploadFile | None = File(None),
@@ -672,6 +806,8 @@ async def create_job(
     extras: list[str] = Form([]),
     demo: bool = Form(False),
 ) -> dict:
+    if settings.library_backend == "postgres" and not course_id and not (lecture_id and book_id):
+        raise HTTPException(400, "Select a course or its stored materials so this work can be saved in the cloud.")
     if backend not in BACKENDS:
         raise HTTPException(400, f"Invalid backend: {backend}. Options: {', '.join(BACKENDS)}")
     if depth not in DEPTHS and depth not in LEGACY_DEPTHS:
@@ -709,11 +845,8 @@ async def create_job(
             # gelen istek zaten tek bir derse ait.
             job.params["course_id"] = job.params["course_id"] or mat.course_id
         elif upload is not None and upload.filename:
-            if not upload.filename.lower().endswith(".pdf"):
-                raise HTTPException(400, "Her iki dosya da PDF olmalı.")
             dest = UPLOADS / f"{job.id}-{name}.pdf"
-            with dest.open("wb") as f:
-                shutil.copyfileobj(upload.file, f)
+            _copy_job_pdf(upload, dest)
             paths[name] = str(dest)
             job.params[f"{name}_name"] = upload.filename
             # Derse yüklendiyse kitaplığa da girsin, yoksa bir dahaki sefere
@@ -758,7 +891,7 @@ def _material_for(kind: str, material_id: str, course_id: str) -> Material:
 
 
 @app.post("/api/practice")
-async def create_practice_job(
+def create_practice_job(
     lecture_id: str = Form(...),
     book_id: str = Form(...),
     # Ders notunda sınav kâğıdı isteğe bağlıydı; burada ŞABLON o, zorunlu.
@@ -799,6 +932,28 @@ async def create_practice_job(
 
     store.submit(job, _execute_practice)
     return job.to_dict()
+
+
+def _copy_job_pdf(upload: UploadFile, dest: Path) -> None:
+    """Apply the same PDF size limits to the legacy generation upload form."""
+    if not (upload.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(400, "The file must be a PDF with a .pdf extension.")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    size = 0
+    try:
+        with dest.open("wb") as target:
+            while chunk := upload.file.read(1024 * 1024):
+                if size == 0 and not chunk.startswith(b"%PDF-"):
+                    raise HTTPException(400, "The file is not a PDF.")
+                size += len(chunk)
+                if size > settings.max_upload_mb * 1024 * 1024:
+                    raise HTTPException(413, f"PDF exceeds {settings.max_upload_mb} MB.")
+                target.write(chunk)
+        if not size:
+            raise HTTPException(400, "The PDF is empty.")
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
 
 
 @app.post("/api/jobs/{job_id}/retry")
@@ -885,6 +1040,9 @@ async def download(job_id: str, fmt: str = "pdf") -> FileResponse:
 async def health() -> dict:
     return {
         "ok": True,
+        "max_upload_mb": settings.max_upload_mb,
+        "max_batch_files": settings.max_batch_files,
+        "max_batch_total_mb": settings.max_batch_total_mb,
         "credentials": LLMClient.credentials_available(),
         "model": settings.model,
         # Arayüz seçenekleri buradan okur; tek kaynak prompts.py.
@@ -897,6 +1055,12 @@ async def health() -> dict:
         # Hangi kimlik yolları kullanılabilir (API anahtarı / Claude Pro / Codex / demo).
         "backends": backend_status(),
     }
+
+
+@app.get("/healthz", include_in_schema=False)
+async def render_healthcheck() -> dict:
+    """Unauthenticated health check for the hosting platform."""
+    return {"ok": True}
 
 
 def _sse(payload: dict) -> str:
@@ -920,6 +1084,11 @@ def _page(name: str) -> str:
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
     return _page("index.html")
+
+
+@app.get("/public", response_class=HTMLResponse)
+async def public_page() -> str:
+    return _page("public.html")
 
 
 @app.get("/ders/{course_id}", response_class=HTMLResponse)

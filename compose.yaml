@@ -1,0 +1,33 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DERSNOTU_ADMIN_PASSWORD: ${DERSNOTU_ADMIN_PASSWORD:?Set a strong admin password in .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DERSNOTU_CACHE_DIR: /data/cache
+      DERSNOTU_OUT_DIR: /data/out
+    volumes:
+      - ragademi_data:/data
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      DOMAIN: ${DOMAIN:?Set your domain in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  ragademi_data:
+  caddy_data:
+  caddy_config:

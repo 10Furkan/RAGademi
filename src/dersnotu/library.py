@@ -47,7 +47,7 @@ DOC_KINDS = ("note", "practice")
 
 # `PRAGMA user_version` ile takip edilir. Şema değişince ARTTIR ve `_migrate`
 # içine adımı yaz — kullanıcının kitaplığı silinebilir bir önbellek değil.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS courses (
@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS documents (
     -- yener. `sections` olmadan saniye/bölüm hesaplanamaz, ikisi birlikte.
     duration    REAL NOT NULL DEFAULT 0,
     sections    INTEGER NOT NULL DEFAULT 0,
+    is_public   INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS documents_by_course ON documents(course_id);
@@ -128,6 +129,7 @@ _DOC_COLUMNS = (
     # v3 — deneme sınavları da bu tabloda. Varsayılan 'note' olduğu için göç
     # öncesi yazılmış her satır doğru türü kendiliğinden alır.
     ("kind", "TEXT NOT NULL DEFAULT 'note'"),
+    ("is_public", "INTEGER NOT NULL DEFAULT 0"),  # v4 — opt-in public sharing
 )
 
 
@@ -254,6 +256,7 @@ class Material:
     pages: int
     created_at: str
     path: Path | None = None
+    stored_remotely: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -265,7 +268,7 @@ class Material:
             "size": self.size,
             "pages": self.pages,
             "created_at": self.created_at,
-            "available": bool(self.path and self.path.exists()),
+            "available": self.stored_remotely or bool(self.path and self.path.exists()),
         }
 
 
@@ -290,7 +293,9 @@ class Document:
     usage: dict[str, Any] = field(default_factory=dict)
     duration: float = 0.0
     sections: int = 0
+    is_public: bool = False
     created_at: str = ""
+    stored_formats: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -310,14 +315,16 @@ class Document:
             "duration": round(self.duration),
             # Ders notunda bölüm, deneme sınavında soru sayısı.
             "sections": self.sections,
+            "is_public": self.is_public,
             "created_at": self.created_at,
-            "has_pdf": bool(self.pdf_path and self.pdf_path.exists()),
-            "has_md": bool(self.md_path and self.md_path.exists()),
-            "has_html": bool(self.html_path and self.html_path.exists()),
+            "has_pdf": "pdf" in self.stored_formats or bool(self.pdf_path and self.pdf_path.exists()),
+            "has_md": "md" in self.stored_formats or bool(self.md_path and self.md_path.exists()),
+            "has_html": "html" in self.stored_formats or bool(self.html_path and self.html_path.exists()),
             # Yeniden deneme hem hatalı bölüm hem de kaynak dosyalar ister;
             # ikincisini sunucu doğruluyor, burada yalnızca ilki bilinir.
             "can_retry": bool(
-                self.failed and self.doc_path and self.doc_path.exists()
+                self.failed and ("doc" in self.stored_formats or
+                                (self.doc_path and self.doc_path.exists()))
             ),
         }
 
@@ -447,7 +454,7 @@ class LibraryStore:
                     (course_id,),
                 )
             ]
-            ciktilar = _output_paths(
+            ciktilar = self._output_paths(
                 c.execute(
                     "SELECT pdf_path, md_path, doc_path, html_path FROM documents"
                     " WHERE course_id = ?",
@@ -461,7 +468,7 @@ class LibraryStore:
 
         return {
             "materials": self._collect_garbage(shas),
-            "documents": _unlink_all(ciktilar),
+            "documents": self._delete_files(ciktilar),
         }
 
     # ----- materyaller ---------------------------------------------------
@@ -489,9 +496,7 @@ class LibraryStore:
         if var is not None:
             return self._row_to_material(var)
 
-        hedef = self.blob_path(sha)
-        if not hedef.exists():
-            hedef.write_bytes(Path(src).read_bytes())
+        hedef = self._store_material(Path(src), sha)
 
         mat = Material(
             id=_uid(), course_id=course_id, kind=kind, name=name, sha=sha,
@@ -568,15 +573,30 @@ class LibraryStore:
             usage=dict(kw.get("usage") or {}),
             duration=float(kw.get("duration") or 0.0),
             sections=int(kw.get("sections") or 0),
+            is_public=bool(kw.get("is_public", False)),
             created_at=kw.get("created_at") or _now(),
         )
         with self._conn() as c:
+            previous = c.execute(
+                "SELECT is_public FROM documents WHERE id = ?", (doc.id,)
+            ).fetchone()
+            # A retry replaces the content of the same document. Its sharing
+            # choice belongs to the owner and must survive that replacement.
+            is_public = int(previous["is_public"]) if previous else int(doc.is_public)
             c.execute(
-                "INSERT OR REPLACE INTO documents (id, course_id, lecture_id,"
+                "INSERT INTO documents (id, course_id, lecture_id,"
                 " book_id, exam_id, kind, title, pdf_path, md_path, doc_path, html_path,"
                 " language, depth, extras, backend, failed, usage, duration,"
-                " sections, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " sections, is_public, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(id) DO UPDATE SET " + ", ".join(
+                    f"{column} = excluded.{column}" for column in (
+                        "course_id", "lecture_id", "book_id", "exam_id", "kind", "title",
+                        "pdf_path", "md_path", "doc_path", "html_path", "language", "depth",
+                        "extras", "backend", "failed", "usage", "duration", "sections",
+                        "is_public", "created_at",
+                    )
+                ),
                 (
                     doc.id, doc.course_id, doc.lecture_id, doc.book_id, doc.exam_id,
                     doc.kind,
@@ -584,10 +604,37 @@ class LibraryStore:
                     _as_str(doc.doc_path), _as_str(doc.html_path),
                     doc.language, doc.depth, json.dumps(doc.extras),
                     doc.backend, json.dumps(doc.failed), json.dumps(doc.usage),
-                    doc.duration, doc.sections, doc.created_at,
+                    doc.duration, doc.sections, is_public, doc.created_at,
                 ),
             )
-        return doc
+        return self.document(doc.id)
+
+    def set_document_public(self, document_id: str, is_public: bool) -> Document:
+        with self._conn() as c:
+            result = c.execute(
+                "UPDATE documents SET is_public = ? WHERE id = ?",
+                (int(is_public), document_id),
+            )
+            if result.rowcount == 0:
+                raise NotFound(f"Document not found: {document_id}")
+        return self.document(document_id)
+
+    def public_documents(self) -> list[dict[str, Any]]:
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT d.id, d.title, d.kind, d.language, d.sections,"
+                " d.created_at, d.pdf_path, c.name AS course_name"
+                " FROM documents d JOIN courses c ON c.id = d.course_id"
+                " WHERE d.is_public = 1 ORDER BY d.created_at DESC"
+            ).fetchall()
+        return [
+            {
+                "id": r["id"], "title": r["title"], "kind": r["kind"],
+                "language": r["language"], "sections": r["sections"],
+                "created_at": r["created_at"], "course_name": r["course_name"],
+            }
+            for r in rows if self._file_available(r["pdf_path"])
+        ]
 
     # ----- arama ---------------------------------------------------------
     def index_document(self, doc_id: str, course_id: str,
@@ -659,7 +706,7 @@ class LibraryStore:
             ).fetchone()
         if row is None:
             raise NotFound(f"Document not found: {document_id}")
-        return _row_to_document(row)
+        return self._row_to_document(row)
 
     def documents(self, course_id: str) -> list[Document]:
         with self._conn() as c:
@@ -667,7 +714,7 @@ class LibraryStore:
                 "SELECT * FROM documents WHERE course_id = ? ORDER BY created_at DESC",
                 (course_id,),
             ).fetchall()
-        return [_row_to_document(r) for r in rows]
+        return [self._row_to_document(r) for r in rows]
 
     def delete_document(self, document_id: str) -> dict[str, int]:
         doc = self.document(document_id)
@@ -675,7 +722,7 @@ class LibraryStore:
             c.execute("DELETE FROM doc_fts WHERE document_id = ?", (document_id,))
             c.execute("DELETE FROM documents WHERE id = ?", (document_id,))
         return {
-            "files": _unlink_all([
+            "files": self._delete_files([
                 p for p in (doc.pdf_path, doc.md_path, doc.doc_path, doc.html_path)
                 if p
             ])
@@ -698,10 +745,32 @@ class LibraryStore:
                 if kalan:
                     continue
                 blob = self.blob_path(sha)
-                if blob.exists():
-                    blob.unlink()
-                    silinen += 1
+                silinen += self._delete_files([blob])
         return silinen
+
+    def fetch_file(self, path: Path | None) -> Path | None:
+        """Resolve a file for reading; cloud backends hydrate their local cache."""
+        return path
+
+    def _store_material(self, src: Path, sha: str) -> Path:
+        target = self.blob_path(sha)
+        if not target.exists():
+            import shutil
+
+            shutil.copyfile(src, target)
+        return target
+
+    def _row_to_document(self, row) -> Document:
+        return _row_to_document(row)
+
+    def _output_paths(self, rows) -> list[Path]:
+        return _output_paths(rows)
+
+    def _delete_files(self, paths: list[Path]) -> int:
+        return _unlink_all(paths)
+
+    def _file_available(self, ref: str | None) -> bool:
+        return bool(ref and Path(ref).is_file())
 
     def _row_to_material(self, row: sqlite3.Row) -> Material:
         return Material(
@@ -748,7 +817,8 @@ def _row_to_document(row: sqlite3.Row) -> Document:
         extras=json.loads(row["extras"]),
         backend=row["backend"], failed=json.loads(row["failed"]),
         usage=json.loads(row["usage"]), duration=row["duration"],
-        sections=row["sections"], created_at=row["created_at"],
+        sections=row["sections"], is_public=bool(row["is_public"]),
+        created_at=row["created_at"],
     )
 
 
@@ -780,7 +850,7 @@ def _as_path(v: Any) -> Path | None:
 
 
 def _as_str(p: Path | None) -> str | None:
-    return str(p) if p else None
+    return p.as_posix() if p else None
 
 
 def _output_paths(rows: list[sqlite3.Row]) -> list[Path]:

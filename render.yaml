@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: ragademi
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      - key: DERSNOTU_ADMIN_PASSWORD
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DERSNOTU_LIBRARY_BACKEND
+        value: postgres
+      - key: DERSNOTU_DATABASE_URL
+        sync: false
+      - key: DERSNOTU_S3_ENDPOINT
+        sync: false
+      - key: DERSNOTU_S3_REGION
+        sync: false
+      - key: DERSNOTU_S3_ACCESS_KEY
+        sync: false
+      - key: DERSNOTU_S3_SECRET_KEY
+        sync: false
+      - key: DERSNOTU_S3_BUCKET
+        value: ragademi
+      - key: DERSNOTU_MAX_UPLOAD_MB
+        value: "50"
+      - key: DERSNOTU_MAX_BATCH_TOTAL_MB
+        value: "100"
+      - key: DERSNOTU_MAX_WORKERS
+        value: "1"
+      - key: DERSNOTU_CACHE_DIR
+        value: /data/cache
+      - key: DERSNOTU_OUT_DIR
+        value: /data/out

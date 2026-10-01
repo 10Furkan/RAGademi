@@ -356,7 +356,7 @@ the cascade and the SET NULL silently do nothing.
 **Output files are named after the document, not the job.** Retry opens a new
 job but produces the *same* document; keying on the job id would add a fresh
 row and a fresh PDF to the course page on every attempt. `job.params["out_stem"]`
-carries the document id and `add_document` is `INSERT OR REPLACE`.
+carries the document id and `add_document` uses an `ON CONFLICT` upsert.
 
 **`/api/documents/{id}/retry` is the one that matters.** `/api/jobs/{id}/retry`
 only works while the server has been up since the run. The real scenario —
@@ -399,6 +399,42 @@ terms with OR because retrieval wants recall. The search box in `library.py`
 has its own builder that joins with AND — someone typing two words wants the
 section containing both. Both must strip punctuation: it is operator syntax in
 FTS5 and `two's complement` raises without it.
+
+### Cloud persistence (`cloud_library.py`, `storage.py`)
+
+Local installs default to SQLite and local files. The Render Free Blueprint
+selects `DERSNOTU_LIBRARY_BACKEND=postgres`: library metadata and generated
+section search live in a private PostgreSQL `ragademi` schema, while source
+PDFs and PDF/Markdown/HTML/JSON outputs live in a private S3-compatible bucket
+(Supabase Storage). Missing cloud settings fail startup; temporary local
+metadata is never substituted after a connection failure.
+
+The cloud store preserves the library API and parameterized SQL. PostgreSQL
+uses `tsvector`/GIN, `to_tsquery` and `ts_headline` for the course search box;
+AND matching and the final prefix term are preserved. Textbook retrieval
+continues to use SQLite FTS5/BM25 in a disposable content-addressed local index.
+It is rebuilt from the cloud source PDF when the local cache disappears.
+
+Source objects use the full SHA-256. Generated files use a document ID and
+unique revision key. Every file is uploaded before metadata is committed.
+A failed file upload keeps the previous revision intact. If the database's
+commit outcome is uncertain, newly uploaded objects are retained: an orphan
+is safer than deleting a file that a committed record references. Successful
+updates clean up the previous revision. Metadata and object deletion are
+separate operations; a network failure can leave unreferenced cloud objects.
+
+Listing metadata does not download files. Local caches are filled only for
+downloads, reading, estimating and generation; downloads write to temporary
+files and atomically rename only after complete delivery. Material deletion
+checks remaining references before removing a shared blob. Cloud availability
+flags describe committed references; manually deleting an object in the
+Supabase dashboard can still make that file unavailable.
+
+Public endpoints check the document's publication flag before fetching its
+PDF. The bucket stays private and credentials remain server-side. Blocking
+cloud operations run in FastAPI's thread pool to keep the event loop available
+for progress streaming. Job state remains process-local: a platform restart
+can interrupt unfinished generation even though completed output is durable.
 
 ### Estimate (`estimate.py`)
 

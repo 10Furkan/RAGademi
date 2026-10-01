@@ -371,9 +371,12 @@ def serve(
     """Start the web interface and API."""
     import uvicorn
 
+    if host not in {"127.0.0.1", "localhost", "::1"} and not settings.admin_password:
+        console.print("[red]Set DERSNOTU_ADMIN_PASSWORD before exposing the server.[/red]")
+        raise typer.Exit(code=1)
     console.print(f"[bold]dersnotu[/bold] → http://{host}:{port}")
     if not LLMClient.credentials_available():
-        console.print("[yellow]No API key found — the interface will use demo mode.[/yellow]")
+        console.print("[yellow]No API key found — select a subscription backend or demo mode.[/yellow]")
     uvicorn.run("dersnotu.api.server:app", host=host, port=port, reload=reload)
 
 
