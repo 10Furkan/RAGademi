@@ -134,8 +134,9 @@ and API. No paid Render service or persistent Render disk is needed.
 3. Wait for Render to finish deploying, then copy the service's HTTPS URL, for
    example `https://ragademi-example.onrender.com`.
 4. In Vercel, import the same GitHub repository. Set the Framework Preset to
-   **Other**, and add `RENDER_ORIGIN` with the Render HTTPS URL for Production
-   and Preview environments. Deploy the project.
+   **Other**. The `vercel.json` file routes all requests to
+   `https://ragademi.onrender.com`; no Vercel environment variables are required.
+   If your Render URL changes, update the destination in that file. Deploy the project.
 5. Open the Vercel deployment URL. The owner interface asks for username
    `admin` and the password configured in Render. Public documents are at
    `/public`; only documents you publish there are visible without signing in.

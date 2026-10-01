@@ -59,9 +59,10 @@ certificate chain and server hostname. Do not disable certificate verification.
    or add a persistent disk. Wait for the service to become healthy.
 3. Open Render's `https://...onrender.com/public` and its owner interface `/`.
    Sign in as `admin` with the configured password.
-4. Vercel: import the same repository, Framework Preset **Other**, and set
-   `RENDER_ORIGIN` to the Render HTTPS URL before deploying. The same-origin
-   interface and API are routed by `vercel.mjs`.
+4. Vercel: import the same repository, Framework Preset **Other**. The
+   `vercel.json` file routes the interface and API to
+   `https://ragademi.onrender.com`. No Vercel environment variables are needed;
+   update the destination in this file if the Render URL changes.
 5. Test a small course upload and publish a generated PDF. Redeploy Render and
    confirm the course and public PDF still load. Your cloud credentials are
    necessary for this final check; local automated tests use simulated storage.
