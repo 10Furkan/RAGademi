@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     library_name: str = "library.sqlite"
     library_backend: Literal["sqlite", "postgres"] = "sqlite"
     database_url: SecretStr = SecretStr("")
+    # Optional provider CA certificate, for example /etc/secrets/supabase-ca.crt.
+    database_ssl_ca_file: str = ""
     s3_endpoint: str = ""
     s3_region: str = ""
     s3_bucket: str = "ragademi"

@@ -41,6 +41,16 @@ directories, a 50 MB upload limit, a 100 MB batch limit, and one generation
 worker. It attaches **no Render disk**. Cloud configuration is mandatory;
 missing settings stop startup rather than silently using a temporary library.
 
+If startup reports `CERTIFICATE_VERIFY_FAILED` or a self-signed certificate
+in the database certificate chain, download the root certificate from Supabase
+**Database Settings -> SSL Configuration -> Download Certificate**. In the
+Render service's **Environment -> Secret Files**, add a file named
+`supabase-ca.crt` containing the complete PEM certificate (including the
+BEGIN/END CERTIFICATE lines). Add the environment variable
+`DERSNOTU_DATABASE_SSL_CA_FILE=/etc/secrets/supabase-ca.crt` and redeploy.
+The app adds this CA to its trust store and continues verifying both the
+certificate chain and server hostname. Do not disable certificate verification.
+
 ## Deploy
 
 1. Commit and push the project to GitHub.

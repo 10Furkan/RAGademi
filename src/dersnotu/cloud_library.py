@@ -101,11 +101,20 @@ def _database_connection(config: Settings):
     parsed = urlsplit(config.database_url.get_secret_value())
     if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname or not parsed.username:
         raise ValueError("DERSNOTU_DATABASE_URL must be a PostgreSQL connection URL.")
+    tls = ssl.create_default_context()
+    if config.database_ssl_ca_file:
+        try:
+            tls.load_verify_locations(cafile=config.database_ssl_ca_file)
+        except (OSError, ssl.SSLError) as exc:
+            raise StorageError(
+                "Cannot load the database CA certificate. Check DERSNOTU_DATABASE_SSL_CA_FILE "
+                "and the certificate file contents."
+            ) from exc
     return dbapi.connect(
         host=parsed.hostname, port=parsed.port or 5432,
         user=unquote(parsed.username), password=unquote(parsed.password or ""),
         database=unquote(parsed.path.removeprefix("/")) or "postgres",
-        ssl_context=ssl.create_default_context(), timeout=20,
+        ssl_context=tls, timeout=20,
         application_name="ragademi",
     )
 
